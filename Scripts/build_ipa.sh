@@ -45,7 +45,7 @@ xcodebuild \
   -configuration "${CONFIG}" \
   -destination 'generic/platform=tvOS' \
   -derivedDataPath "${DERIVED}" \
-  -allowProvisioningUpdates NO \
+  -allowProvisioningUpdates \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGN_IDENTITY="" \
   build 2>&1 | tail -60
