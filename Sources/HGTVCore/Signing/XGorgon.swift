@@ -91,7 +91,7 @@ public final class RequestSigner: @unchecked Sendable {
             }
 
             let h1 = customHash(seed: customHash(seed: 539167016, data: queryBytes), data: bodyMD5)
-            let h2 = customHash(seed: h1, data: le32(ts))
+            let h2 = customHash(seed: h1, data: le32(UInt32(truncatingIfNeeded: ts)))
             if (h2 & 15) % 3 != 0 { continue }
 
             let fullURL = baseURL + "?" + query
@@ -236,7 +236,7 @@ public final class RequestSigner: @unchecked Sendable {
         var input = [UInt8](repeating: 0, count: 52)
         input.replaceSubrange(0..<32, with: urlHash.prefix(32))
         input.replaceSubrange(32..<48, with: bodyMD5)
-        input.replaceSubrange(48..<52, with: le32(ts))
+        input.replaceSubrange(48..<52, with: le32(UInt32(truncatingIfNeeded: ts)))
 
         // medusa selector
         let sel = Int(crc64(Array("646637794".utf8)) ^ UInt64(truncatingIfNeeded: ts)) & 15

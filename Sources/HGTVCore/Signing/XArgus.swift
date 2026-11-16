@@ -183,7 +183,7 @@ public enum MedusaBranch {
         }
         block[56] = 0x80
         for i in 0..<8 {
-            block[56 + i] = jbyte(UInt32(416) >> UInt32((7 - i) * 8))
+            block[56 + i] = jbyte(Int(416) >> ((7 - i) * 8))
         }
 
         @inline(__always)
