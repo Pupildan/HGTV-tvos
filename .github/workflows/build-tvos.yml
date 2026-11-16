@@ -9,28 +9,49 @@ on:
 jobs:
   build:
     name: Build unsigned tvOS ipa
-    runs-on: macos-26   # macOS 26 + Xcode 26（tvOS 26 / 液态玻璃需要）
+    runs-on: macos-latest   # macOS 26 arm64（文档确认有效标签），带最新 Xcode
     timeout-minutes: 40
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26
+      - name: Diagnose environment
         run: |
-          ls /Applications | grep -i xcode || true
-          sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer || \
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          echo "=== runner ==="
+          uname -a
+          sw_vers
+          echo "=== Xcode versions installed ==="
+          ls /Applications | grep -i xcode || echo "(no Xcode_* dirs)"
+          xcodebuild -version
+          echo "=== sdks ==="
+          xcodebuild -showsdks 2>/dev/null | grep -i tvos || true
+
+      - name: Select Xcode
+        run: |
+          # 优先 Xcode 26，退回默认
+          if [ -d /Applications/Xcode_26.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
+          else
+            sudo xcode-select -s "$(xcode-select -p)"
+          fi
           xcodebuild -version
           swift --version
-
-      - name: Show tvOS SDKs
-        run: xcrun --sdk appletvos --show-sdk-path || true
 
       - name: Build + package unsigned ipa
         run: |
           chmod +x Scripts/build_ipa.sh
-          ./Scripts/build_ipa.sh
+          set -o pipefail
+          ./Scripts/build_ipa.sh 2>&1 | tee build_output.log
+
+      - name: Upload build log (always, for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output-log
+          path: build_output.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload unsigned ipa artifact
         uses: actions/upload-artifact@v4
