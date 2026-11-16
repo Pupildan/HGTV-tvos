@@ -39,7 +39,6 @@ struct PlayerView: View {
             }
         }
         .navigationTitle(item.title ?? "")
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             Task { await playerModel.play(itemId: item.id) }
         }
