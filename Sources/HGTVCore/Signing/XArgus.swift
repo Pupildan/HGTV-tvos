@@ -109,7 +109,7 @@ public enum MedusaBranch {
         block.replaceSubrange(0..<52, with: input.prefix(52))
         for i in 0..<8 {
             // u1.c(e1.g[i], -(base+5))：e1.g 是 byte 表，rotate 后截断
-            block[52 + i] = jbyte(E1C.g[i])
+            block[52 + i] = E1C.g[i]   // 已是 UInt8，无需 jbyte
         }
         for i in 0..<8 {
             block[56 + i] = jbyte(UInt32(416) >> UInt32((7 - i) * 8))
@@ -179,7 +179,7 @@ public enum MedusaBranch {
         var block = [UInt8](repeating: 0, count: 64)
         block.replaceSubrange(0..<52, with: input.prefix(52))
         for i in 0..<4 {
-            block[52 + i] = jbyte(E1C.d[i])
+            block[52 + i] = E1C.d[i]   // 已是 UInt8，无需 jbyte
         }
         block[56] = 0x80
         for i in 0..<8 {
