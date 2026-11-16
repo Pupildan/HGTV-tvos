@@ -24,7 +24,7 @@ public struct APIEnvelope<T: Decodable>: Decodable {
 }
 
 // MARK: - 剧集条目（书 / 短剧）
-public struct DramaItem: Identifiable, Decodable, Hashable {
+public struct DramaItem: Identifiable, Codable, Hashable {
     // id 只依赖存储属性，避免在 Hashable 合成 hash 里访问 hashValue 造成递归
     public var id: String { bookId ?? title ?? "" }
     public let bookId: String?
