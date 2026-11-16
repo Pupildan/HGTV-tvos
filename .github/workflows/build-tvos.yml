@@ -1,0 +1,41 @@
+name: Build tvOS
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned tvOS ipa
+    runs-on: macos-26   # macOS 26 + Xcode 26（tvOS 26 / 液态玻璃需要）
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          ls /Applications | grep -i xcode || true
+          sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer || \
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Show tvOS SDKs
+        run: xcrun --sdk appletvos --show-sdk-path || true
+
+      - name: Build + package unsigned ipa
+        run: |
+          chmod +x Scripts/build_ipa.sh
+          ./Scripts/build_ipa.sh
+
+      - name: Upload unsigned ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HGTV-tvOS-unsigned
+          path: dist/HGTV-tvOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
