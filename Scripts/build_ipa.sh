@@ -28,14 +28,16 @@ swift package resolve
 echo "==> detecting available schemes"
 # xcodebuild 对裸 SwiftPM 包自动生成的 scheme 名可能是 HGTV / HGTV-Package / HGTVCore，
 # 假设错会直接失败，故探测可用 scheme，优先取与产品名一致的。
-SCHEME_LIST="$(xcodebuild -list 2>/dev/null | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' || true)"
+# 注意：xcodebuild -list 输出每行有前导空格，须先 trim 再精确匹配。
+SCHEME_LIST="$(xcodebuild -list 2>/dev/null | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | xargs -I{} echo {} || true)"
 echo "available schemes: ${SCHEME_LIST//$'\n'/, }"
 if echo "${SCHEME_LIST}" | grep -qx "${SCHEME}"; then
   :
 elif echo "${SCHEME_LIST}" | grep -qx "${SCHEME}-Package"; then
   SCHEME="${SCHEME}-Package"
-elif echo "${SCHEME_LIST}" | grep -q "HGTVCore"; then
-  SCHEME="HGTVCore"
+else
+  # 兜底取第一个可用 scheme（通常是产品名）
+  SCHEME="$(echo "${SCHEME_LIST}" | head -1)"
 fi
 echo "==> using scheme: ${SCHEME}"
 
@@ -51,10 +53,12 @@ xcodebuild \
   build 2>&1 | tail -60
 
 echo "==> locating built binary"
-BIN="$(find "${DERIVED}/Build/Products" -type f -name "${SCHEME}" -perm +111 | head -1 || true)"
+# 可执行名可能是产品名 HGTV 或 target 名 HGTVApp
+BIN="$(find "${DERIVED}/Build/Products" -type f \( -name "${SCHEME}" -o -name "HGTVApp" \) -perm +111 | head -1 || true)"
+BIN_NAME="$(basename "${BIN:-${SCHEME}}")"
 if [ -z "${BIN}" ]; then
-  echo "WARN: no executable named ${SCHEME}, trying .app bundle..."
-  APP_BUNDLE="$(find "${DERIVED}/Build/Products" -type d -name "${SCHEME}.app" | head -1 || true)"
+  echo "WARN: no executable named ${SCHEME}/HGTVApp, trying .app bundle..."
+  APP_BUNDLE="$(find "${DERIVED}/Build/Products" -type d \( -name "${SCHEME}.app" -o -name "HGTVApp.app" \) | head -1 || true)"
   if [ -n "${APP_BUNDLE}" ]; then
     echo "==> found .app bundle: ${APP_BUNDLE}"
     rm -rf "${DIST}"
