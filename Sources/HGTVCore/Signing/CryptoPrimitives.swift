@@ -110,7 +110,8 @@ func md5(_ message: [UInt8]) -> [UInt8] {
         6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
     ]
     let kTable: [UInt32] = (0..<64).map { i in
-        UInt32(truncatingIfNeeded: Int64(Foundation.abs(Foundation.sin(Double(i + 1))) * 4294967296.0))
+        let v = Foundation.sin(Double(i + 1)) * 4294967296.0
+        return UInt32(truncatingIfNeeded: Int64(v.magnitude))
     }
 
     var msg = message

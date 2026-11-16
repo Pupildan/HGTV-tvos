@@ -215,7 +215,7 @@ public func serialize(schema: [MedusaField], params: MedusaParams) throws -> [UI
                     throw MedusaError.int32Overflow(x)
                 }
                 let i = Int32(truncatingIfNeeded: x)
-                enc = UInt64(UInt32(bitPattern: Int32(bitPattern: (i << 1) ^ (i >> 31))))
+                enc = UInt64(UInt32(bitPattern: (i << 1) ^ (i >> 31)))
             }
             out.append(contentsOf: varint(UInt64(UInt32(bitPattern: field.id)) << 3 | 5))
             out.append(contentsOf: varint(enc))

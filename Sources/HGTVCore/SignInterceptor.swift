@@ -70,7 +70,7 @@ public final class SignInterceptor: @unchecked Sendable {
         var merged = CommonParams.query(
             deviceID: credentials.deviceId.isEmpty ? nil : credentials.deviceId,
             iid: credentials.installId.isEmpty ? nil : credentials.installId,
-            installID: credentials.installId.isEmpty ? nil : credentials.installID
+            installID: credentials.installId.isEmpty ? nil : credentials.installId
         )
         for (k, v) in params { merged[k] = v }
 
