@@ -4,10 +4,16 @@
 import Foundation
 
 public enum CommonParams {
-    /// R3.a：静态默认 query map（clinit 行 1576-1624 原样搬运）
+    /// R3.a：静态默认 query map
+    /// 设备身份已替换为开发机端到端验证过的真实值（原 APK 注册产物，
+    /// bookmall/tab 实测返回 62KB 真实数据）。旧的红米假设备身份会导致内容接口返空。
     public static let defaults: [String: String] = [
-        "iid": "1905892595382586",
-        "device_id": "1905892595378490",
+        "iid": "4280878733470867",
+        "device_id": "4280878733466771",
+        "install_id": "4280878733470867",
+        "openudid": "25bc291e06c950fa3431",
+        "cdid": "7868af32-90ad-441e-b1f8-3ef7d1c515ff",
+        "clientudid": "4b59a9f3-d9a9-42ee-b58a-0e0fa13c9ee5",
         "ac": "wifi",
         "channel": "update_64",
         "aid": "8662",
@@ -17,17 +23,17 @@ public enum CommonParams {
         "device_platform": "android",
         "os": "android",
         "ssmix": "a",
-        "device_type": "25053RT47C",
-        "resolution": "1280*2772",
+        "device_type": "SM-F7310",
+        "resolution": "2546*1080",
         "need_personal_recommend": "1",
         "player_so_load": "1",
         "is_android_pad_screen": "0",
-        "device_brand": "Redmi",
+        "device_brand": "samsung",
         "language": "zh",
         "os_api": "36",
         "os_version": "16",
         "manifest_version_code": "74332",
-        "dpi": "520",
+        "dpi": "480",
         "update_version_code": "74332",
         "host_abi": "arm64-v8a",
         "dragon_device_type": "phone",
@@ -44,8 +50,8 @@ public enum CommonParams {
                              iid: String? = nil,
                              installID: String? = nil) -> [String: String] {
         var q = defaults
-        let idx = abs(channel.hashValue) % deviceTypeCandidates.count
-        q["device_type"] = deviceTypeCandidates[idx]
+        // device_type 保持 defaults 里的已验证值（SM-F7310），不再随机覆盖为红米型号，
+        // 否则会破坏与开发机验证一致的设备指纹导致内容接口返空。
         q["ac"] = "wifi"
         q["channel"] = "update_64"
         q["aid"] = "8662"
@@ -59,9 +65,10 @@ public enum CommonParams {
         q["os"] = "android"
         q["os_api"] = "36"
         q["os_version"] = "16"
-        if let v = deviceID { q["device_id"] = v } else { q.removeValue(forKey: "device_id") }
-        if let v = iid { q["iid"] = v } else { q.removeValue(forKey: "iid") }
-        if let v = installID { q["install_id"] = v } else { q.removeValue(forKey: "install_id") }
+        // credentials 为空时保留 defaults 里的已验证设备身份（不再删除导致请求无设备参数）。
+        if let v = deviceID { q["device_id"] = v }
+        if let v = iid { q["iid"] = v }
+        if let v = installID { q["install_id"] = v }
         return q
     }
 
@@ -70,8 +77,8 @@ public enum CommonParams {
     public static func userAgent(for device: [String: String]?, cronet: Bool) -> String {
         let vc = device?["version_code"] ?? "74332"
         let os = device?["os_version"] ?? "16"
-        let model = device?["device_type"] ?? "25053RT47C"
-        let build = device?["rom_version"] ?? "BP2A.250605.031.A3"
+        let model = device?["device_type"] ?? "SM-F7310"
+        let build = device?["rom_version"] ?? "BP4A.251205.006.F7310ZCS9GZF1"
         if cronet {
             return "com.phoenix.read/\(vc) (Linux; U; Android \(os); zh_CN; \(model); Build/\(build); Cronet/TTNetVersion:8d40f833 2026-03-03 QuicVersion:21ac1950 2025-11-18)"
         } else {
