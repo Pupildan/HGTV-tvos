@@ -10,6 +10,9 @@ struct RootTabView: View {
 
     var body: some View {
         TabView {
+            RecommendView()
+                .tabItem { Label("推荐", systemImage: "play.rectangle.fill") }
+
             HomeView()
                 .tabItem { Label("首页", systemImage: "house.fill") }
 
