@@ -44,7 +44,7 @@ public final class DiagnosticsLogger: @unchecked Sendable {
 
     // MARK: - 可变状态（lock 保护）
 
-    private let lock = OSAllocatedUnfairLock(initialState: State(), label: "hgtv.diagnostics")
+    private let lock = OSAllocatedUnfairLock(initialState: State())
     private struct State {
         var ring: [String] = []
         var transports: [DiagnosticsTransport] = []
