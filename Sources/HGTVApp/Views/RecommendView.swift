@@ -6,6 +6,7 @@
 
 import SwiftUI
 import AVFoundation
+import AVKit
 import HGTVCore
 
 @MainActor
@@ -13,6 +14,8 @@ import HGTVCore
 final class RecommendViewModel {
     var dramas: [DramaItem] = []
     var currentIndex = 0
+    /// 滚动位置绑定（scrollPosition(id:) 需要 Hashable，用 drama.id）
+    var currentIndexID: String?
     var isLoading = false
     var errorMessage: String?
 
@@ -38,6 +41,7 @@ final class RecommendViewModel {
             // 只保留有 vid 的剧目（multi_video_model 需要 vid）
             dramas = (groups.flatMap { $0.items ?? [] }).filter { ($0.videoId ?? "").isEmpty == false }
             if !dramas.isEmpty {
+                currentIndexID = dramas[0].id
                 await play(at: 0)
                 prefetchNext()
             }
@@ -50,6 +54,7 @@ final class RecommendViewModel {
     func play(at index: Int) async {
         guard dramas.indices.contains(index) else { return }
         currentIndex = index
+        currentIndexID = dramas[index].id
         guard let vid = dramas[index].videoId else { return }
 
         // 命中缓存直接换 item
@@ -110,14 +115,17 @@ final class RecommendViewModel {
     private func prefetchNext() {
         let next = currentIndex + 1
         guard dramas.indices.contains(next), let vid = dramas[next].videoId, cache[vid] == nil else { return }
-        Task.detached(priority: .utility) { [weak self] in
+        Task { [weak self] in
+            // 解密放后台线程，缓存写入回主 actor（cache 是 main-actor 隔离的）
             guard let self else { return }
             do {
                 let stream = try await APIService.shared.fetchPlayback(vid: vid)
                 guard !stream.spadeA.isEmpty else { return }
                 let encrypted = try await APIService.shared.downloadData(from: stream.url)
                 let key = try SpadeKey.deriveKey(stream.spadeA)
-                let plain = try CENCDecryptor.decrypt(data: encrypted, key: key)
+                let plain = try await Task.detached(priority: .utility) {
+                    try CENCDecryptor.decrypt(data: encrypted, key: key)
+                }.value
                 let proxy = PlaybackProxy(payload: plain)
                 let localURL = try await proxy.start()
                 let item = AVPlayerItem(url: localURL)
@@ -184,18 +192,20 @@ struct RecommendView: View {
                 } else {
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(model.dramas.enumerated()), id: \.offset) { index, drama in
-                                feedPage(index: index, drama: drama, size: geo.size)
+                            ForEach(model.dramas, id: \.id) { drama in
+                                feedPage(drama: drama, size: geo.size)
                                     .frame(width: geo.size.width, height: geo.size.height)
                             }
                         }
                         .scrollTargetLayout()
                     }
-                    .scrollPosition(id: $model.currentIndex)
+                    .scrollPosition(id: $model.currentIndexID)
                     .scrollTargetBehavior(.paging)
                     .ignoresSafeArea()
-                    .onChange(of: model.currentIndex) { _, newIndex in
-                        Task { await model.play(at: newIndex) }
+                    .onChange(of: model.currentIndexID) { _, newID in
+                        if let newID, let idx = model.dramas.firstIndex(where: { $0.id == newID }) {
+                            Task { await model.play(at: idx) }
+                        }
                     }
                 }
             }
@@ -210,11 +220,12 @@ struct RecommendView: View {
     }
 
     @ViewBuilder
-    private func feedPage(index: Int, drama: DramaItem, size: CGSize) -> some View {
-        ZStack {
+    private func feedPage(drama: DramaItem, size: CGSize) -> some View {
+        let isCurrent = (drama.id == model.currentIndexID)
+        return ZStack {
             Color.black
             // 仅当前页挂播放器（LazyVStack 按需渲染，非当前页复用同一个 AVPlayer）
-            if index == model.currentIndex, let player = model.player {
+            if isCurrent, let player = model.player {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
                     .clipped()
@@ -245,7 +256,7 @@ struct RecommendView: View {
                         }
                     }
                     Spacer()
-                    if index == model.currentIndex && model.isLoading {
+                    if isCurrent && model.isLoading {
                         ProgressView()
                     }
                 }
