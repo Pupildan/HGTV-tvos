@@ -2,10 +2,11 @@
 // CENC-AES-CTR mp4 解密（番茄短剧 progressive mp4，非 fragmented）。
 // 忠实移植 gorgon_py/cenc_decrypt.py：解析 moov→trak→mdia→minf→stbl 下的
 // stsz/stsc/stco(co64)/senc，逐样本用其 IV 做 AES-128-CTR 整样本解密。
-// CTR 不能用 CryptoKit 的 AES.GCM，这里用 CryptoKit 的 AES.BlockFunction 手写 CTR keystream。
+// CTR 计数器块 = IV(8) + 8 字节 big-endian 从 0 起。CryptoKit 的 AES.GCM 无法对齐
+// （12 字节 nonce 时首数据块计数器固定从 J0+1=2 起，给不出 counter_0/counter_1），
+// 因此逐 16 字节计数器块用纯 Swift 手写 AES-128-ECB（AESECB.swift）生成 keystream。
 
 import Foundation
-import CryptoKit
 
 public enum CENCError: Error, LocalizedError {
     case noMoov
@@ -13,6 +14,7 @@ public enum CENCError: Error, LocalizedError {
     case missingTable(String)
     case truncated
     case cryptoFailed(Int32)
+    case keySizeInvalid
 
     public var errorDescription: String? {
         switch self {
@@ -21,6 +23,7 @@ public enum CENCError: Error, LocalizedError {
         case .missingTable(let t): return "stbl 缺少 \(t) box"
         case .truncated: return "mp4 数据被截断"
         case .cryptoFailed(let s): return "AES-CTR 解密失败 (status=\(s))"
+        case .keySizeInvalid: return "AES-128 密钥长度必须为 16 字节"
         }
     }
 }
@@ -257,28 +260,46 @@ public enum CENCDecryptor {
         return Data(buf)
     }
 
-    // MARK: - AES-128-CTR（CryptoKit；CommonCrypto 在 framework target 未暴露）
+    // MARK: - AES-128-CTR（纯 Swift 手写 AES-128-ECB 生成 keystream）
 
-    /// CENC 8 字节 IV → CTR 解密。CENC 计数器 = IV(8) + 8 字节 big-endian 从 0 起，
-    /// keystream 块 k = AES-ECB(counter_k)。用 AES.GCM 生成 keystream：GCM 内部计数器从
-    /// J0+1 开始（J0 = nonce||0x00000002），故把 nonce 设为 IV + 0x00000001，使 GCM 的
-    /// 首个数据计数器 = IV + 0x00000002 = CENC 的 counter_1，逐块对齐。对全零数据加密，
-    /// 密文（去 tag）即 keystream。
+    /// CENC 8 字节 IV → CTR 解密。CENC 计数器块 = IV(8) + 8 字节 big-endian 从 0 起，
+    /// keystream 块 k = AES-ECB(IV || k)。首块计数器是 IV||0x0000000000000000（counter_0）。
+    ///
+    /// ⚠️ 不要用 CryptoKit 的 AES.GCM 生成 keystream：12 字节 nonce 时 GCM 计数器只在
+    /// 末 4 字节递增，且首数据块固定从 J0+1（=nonce||0x00000002）开始，只能产出
+    /// counter_2、counter_3…，永远给不出 counter_0/counter_1，且字节布局也不对。
+    /// CommonCrypto 在本 target 不可用，故用纯 Swift 手写 AES-128-ECB 单块加密，
+    /// 逐 16 字节计数器块生成 keystream，再 XOR 到 data。
     static func ctrCrypt(key: Data, iv: [UInt8], data: [UInt8]) throws -> [UInt8] {
         guard !data.isEmpty else { return data }
-        // nonce = IV(8) + 0x00000001（big-endian），使 GCM 首数据计数器对齐 CENC counter_1
-        var nonceBytes = [UInt8](repeating: 0, count: 12)
-        for i in 0..<min(iv.count, 8) { nonceBytes[i] = iv[i] }
-        nonceBytes[11] = 1
-        let nonce = try AES.GCM.Nonce(data: Data(nonceBytes))
-        let symmetricKey = SymmetricKey(data: key)
-        let zeros = Data(repeating: 0, count: data.count)
-        let sealed = try AES.GCM.seal(zeros, using: symmetricKey, nonce: nonce)
-        // sealed.combined = ciphertext(=keystream) || tag(16)
-        let combined = [UInt8](sealed.combined!)
-        guard combined.count >= data.count else { throw CENCError.cryptoFailed(-2) }
+
+        let keyBytes = [UInt8](key)
+        guard keyBytes.count == 16 else {
+            throw CENCError.keySizeInvalid
+        }
+
+        // 16 字节计数器块 = IV(8) + 8 字节 big-endian 计数器（从 0 起）
+        var counter = [UInt8](repeating: 0, count: 16)
+        for i in 0..<min(iv.count, 8) { counter[i] = iv[i] }
+        // counter[8..<16] 保持 0 → 首块即 CENC counter_0
+
         var out = [UInt8](repeating: 0, count: data.count)
-        for i in 0..<data.count { out[i] = data[i] ^ combined[i] }
+        var blockStart = 0
+        while blockStart < data.count {
+            // keystream 块 = AES-128-ECB(key, 当前计数器块)
+            let keystream = ecbEncryptBlock(key: keyBytes, block: counter)
+            guard keystream.count == 16 else {
+                throw CENCError.keySizeInvalid
+            }
+            // XOR 本块数据（末块可能不足 16 字节）
+            let blockEnd = min(blockStart + 16, data.count)
+            for j in blockStart..<blockEnd {
+                out[j] = data[j] ^ keystream[j - blockStart]
+            }
+            // 计数器 +1（8 字节 big-endian，进位跨越全部 8 字节）
+            incrementCounter(&counter)
+            blockStart = blockEnd
+        }
         return out
     }
 
