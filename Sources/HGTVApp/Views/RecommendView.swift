@@ -17,7 +17,11 @@ final class RecommendViewModel {
     /// 滚动位置绑定（scrollPosition(id:) 需要 Hashable，用 drama.id）
     var currentIndexID: String?
     var isLoading = false
+    var isLoadingMore = false
     var errorMessage: String?
+    /// 无限 feed：已见 vid，去重累积（原 APK 机制：反复请求同一 URL，按 vid 去重追加）
+    private var seenVids: Set<String> = []
+    private let feedTabType = 8   // 找剧 tab（抖音式混合流）
 
     /// 共享播放器（竖向滑动切换集时复用同一个 AVPlayer）
     private(set) var player: AVPlayer?
@@ -32,21 +36,49 @@ final class RecommendViewModel {
         dramas.indices.contains(currentIndex) ? dramas[currentIndex] : nil
     }
 
+    /// 首次加载：拉第一批 feed 并播放第一集
     func load() async {
         guard dramas.isEmpty else { return }
-        isLoading = true
-        defer { isLoading = false }
+        await loadMore()
+        if !dramas.isEmpty {
+            currentIndexID = dramas[0].id
+            await play(at: 0)
+        }
+    }
+
+    /// 无限 feed：请求一批（服务端按 session 随机出 ~6 条），按 vid 去重后追加。
+    /// 原 APK 无分页参数，靠反复请求累积。
+    func loadMore() async {
+        guard !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
         do {
-            let groups = try await APIService.shared.fetchHome()
-            // 只保留有 vid 的剧目（multi_video_model 需要 vid）
-            dramas = (groups.flatMap { $0.items ?? [] }).filter { ($0.videoId ?? "").isEmpty == false }
-            if !dramas.isEmpty {
+            let groups = try await APIService.shared.fetchHome(tabType: feedTabType)
+            let batch = (groups.flatMap { $0.items ?? [] })
+                .filter { drama in
+                    guard let vid = drama.videoId, !vid.isEmpty else { return false }
+                    guard !seenVids.contains(vid) else { return false }
+                    seenVids.insert(vid)
+                    return true
+                }
+            guard !batch.isEmpty else { return }
+            let wasEmpty = dramas.isEmpty
+            dramas.append(contentsOf: batch)
+            if wasEmpty {
                 currentIndexID = dramas[0].id
                 await play(at: 0)
-                prefetchNext()
             }
         } catch {
-            errorMessage = error.localizedDescription
+            if dramas.isEmpty { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// 滚动预取：接近底部时加载更多
+    func loadMoreIfNeeded(currentID: String?) async {
+        guard let id = currentID,
+              let idx = dramas.firstIndex(where: { $0.id == id }) else { return }
+        if idx >= dramas.count - 3 {
+            await loadMore()
         }
     }
 
@@ -203,9 +235,12 @@ struct RecommendView: View {
                     .scrollTargetBehavior(.paging)
                     .ignoresSafeArea()
                     .onChange(of: model.currentIndexID) { _, newID in
-                        if let newID, let idx = model.dramas.firstIndex(where: { $0.id == newID }) {
+                        guard let newID else { return }
+                        if let idx = model.dramas.firstIndex(where: { $0.id == newID }) {
                             Task { await model.play(at: idx) }
                         }
+                        // 无限 feed：接近底部自动加载更多
+                        Task { await model.loadMoreIfNeeded(currentID: newID) }
                     }
                 }
             }
@@ -232,7 +267,7 @@ struct RecommendView: View {
             } else {
                 // 非当前页显示封面占位
                 AsyncImage(url: drama.thumbURL) { image in
-                    image.resizable().aspectRatio(contentMode: .cover)
+                    image.resizable().aspectRatio(contentMode: ContentMode.fill)
                 } placeholder: {
                     Color.gray.opacity(0.3)
                 }
