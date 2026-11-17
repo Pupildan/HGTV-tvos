@@ -213,8 +213,19 @@ public final class APIService: Sendable {
         }
         guard let videoList = vm["video_list"] as? [[String: Any]] else { return nil }
 
-        // 优先选带 spade_a 的加密流；其次退回任意 main_url
-        var fallback: PlaybackStream?
+        // 选最高清晰度。实测 video_list 顺序不保证（同一条视频 5 档 quality_type
+        // 40/30/20/10/1，全部带 spade_a；v18 撞到过最低档）。策略：
+        //   1) 有加密流（spade_a 非空）优先在加密流里挑 quality_type 最大者；
+        //   2) 无加密流退回全部候选里 quality_type 最大者；
+        //   3) quality_type 缺失按 Int.min 处理（并列时保留先出现的）。
+        struct Candidate {
+            let url: URL
+            let spadeA: String
+            let kid: String?
+            let quality: Int
+        }
+        var encrypted: [Candidate] = []
+        var plain: [Candidate] = []
         for item in videoList {
             guard let urlStr = item["main_url"] as? String, let url = URL(string: urlStr) else {
                 continue
@@ -222,14 +233,23 @@ public final class APIService: Sendable {
             let encrypt = item["encrypt_info"] as? [String: Any] ?? [:]
             let spade = encrypt["spade_a"] as? String ?? ""
             let kid = encrypt["kid"] as? String
-            if !spade.isEmpty {
-                return PlaybackStream(url: url, spadeA: spade, kid: kid)
+            let quality: Int
+            if let q = item["quality_type"] as? Int {
+                quality = q
+            } else if let s = item["quality_type"] as? String, let q = Int(s) {
+                quality = q
+            } else {
+                quality = Int.min
             }
-            if fallback == nil {
-                fallback = PlaybackStream(url: url, spadeA: "", kid: kid)
-            }
+            let c = Candidate(url: url, spadeA: spade, kid: kid, quality: quality)
+            if spade.isEmpty { plain.append(c) } else { encrypted.append(c) }
         }
-        return fallback
+        let pool = encrypted.isEmpty ? plain : encrypted
+        guard let best = pool.max(by: { $0.quality < $1.quality }) else { return nil }
+        DiagnosticsLogger.log(
+            "选定清晰度 q=\(best.quality) 加密=\(!best.spadeA.isEmpty) 候选=\(videoList.count) 档",
+            category: "playback", level: .info)
+        return PlaybackStream(url: best.url, spadeA: best.spadeA, kid: best.kid)
     }
 
     /// 下载加密 mp4（CDN 直链，无需签名，跟随重定向）。
