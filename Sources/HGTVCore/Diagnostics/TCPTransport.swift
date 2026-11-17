@@ -93,9 +93,8 @@ public actor TCPTransport: DiagnosticsTransport {
         browser?.cancel()
         let params = NWParameters()
         params.includePeerToPeer = false
-        // 显式构造 descriptor，避免 .service 枚举闭包的类型推断问题
-        let descriptor = NWBrowser.Descriptor(service: serviceType, domain: domain, interface: nil)
-        let browser = NWBrowser(for: descriptor, using: params)
+        // 用静态工厂方法构造 service descriptor（Descriptor 无公开构造器）；service 有 3 个关联值
+        let browser = NWBrowser(for: .service(type: serviceType, domain: domain, interface: nil), using: params)
         self.browser = browser
 
         browser.stateUpdateHandler = { [weak self] newState in
@@ -299,7 +298,7 @@ public actor TCPTransport: DiagnosticsTransport {
             } catch {
                 return // 任务被取消
             }
-            guard let self, self.started else { return }
+            guard let self, await self.started else { return }
             await self.reconnect()
         }
     }
