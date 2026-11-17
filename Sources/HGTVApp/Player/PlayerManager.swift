@@ -123,7 +123,7 @@ final class PlayerManager {
         guard let player = players.removeValue(forKey: index) else { return }
         player.pause()
         player.replaceCurrentItem(with: nil)
-        removeObservers(index)
+        removeObservers(index: index)
         DiagnosticsLogger.log("驱逐 index=\(index)（pause + item=nil）池大小=\(players.count)", category: "playback", level: .info)
         onEvicted?(index)
     }
@@ -149,7 +149,7 @@ final class PlayerManager {
                 player.pause()
                 player.replaceCurrentItem(with: nil)
             }
-            removeObservers(key)
+            removeObservers(index: key)
         }
         players.removeAll()
         pendingNeighbors.removeAll()

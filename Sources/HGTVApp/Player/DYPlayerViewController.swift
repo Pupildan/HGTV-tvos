@@ -77,7 +77,6 @@ final class DYPlayerViewController: UIViewController {
 
         let cv = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         cv.backgroundColor = .black
-        cv.isPagingEnabled = false                 // tvOS 不可用，手动 snap
         cv.showsVerticalScrollIndicator = false
         cv.alwaysBounceVertical = true
         cv.contentInsetAdjustmentBehavior = .never
