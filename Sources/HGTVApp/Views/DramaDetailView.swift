@@ -27,7 +27,7 @@ struct DramaDetailView: View {
     @State private var loadError: String?
     @State private var coverImage: UIImage?
     @State private var ambientColor: Color = Color(red: 0.09, green: 0.09, blue: 0.13)
-    @State private var focusedEpisode: Int?
+    @FocusState private var focusedEpisode: Int?
     @State private var playingVid: VidRef?
 
     struct VidRef: Identifiable, Equatable {

@@ -146,19 +146,20 @@ final class DYPlayerViewController: UIViewController {
         playToEndObserver = NotificationCenter.default.addObserver(
             forName: name, object: nil, queue: .main
         ) { [weak self] note in
-            guard let self,
-                  let ended = note.object as? AVPlayerItem else { return }
-            let centered = self.manager.peekPlayer(at: self.engine.index)
-            guard centered?.currentItem === ended else { return }
-            if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
-                DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
-                self.scrollTo(index: next, animated: true)
-            } else {
-                // 向前无可播：补一批 feed 后再试一次
-                Task { [weak self] in
-                    await self?.loadMoreAndSync()
-                    if let next = self?.engine.nearestPlayableIndex(after: self?.engine.index ?? 0, forwardOnly: true) {
-                        self?.scrollTo(index: next, animated: true)
+            guard let ended = note.object as? AVPlayerItem else { return }
+            // 通知块是 @Sendable 上下文，所有 MainActor 操作统一 hop 回主 actor
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let centered = self.manager.peekPlayer(at: self.engine.index)
+                guard centered?.currentItem === ended else { return }
+                if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
+                    DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
+                    self.scrollTo(index: next, animated: true)
+                } else {
+                    // 向前无可播：补一批 feed 后再试一次
+                    await self.loadMoreAndSync()
+                    if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
+                        self.scrollTo(index: next, animated: true)
                     }
                 }
             }
