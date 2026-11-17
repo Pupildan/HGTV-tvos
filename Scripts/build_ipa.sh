@@ -54,12 +54,16 @@ xcodebuild archive \
   2>&1 | tail -60
 
 echo "==> locating archived .app"
-# 规范 .app 在 xcarchive 的 Products/Applications 下
-APP_BUNDLE="$(find "${ARCHIVE}/Products/Applications" -maxdepth 1 -type d -name '*.app' | head -1 || true)"
+echo "==> archive structure:"
+find "${ARCHIVE}" -maxdepth 4 | head -60 || true
+# 规范 .app 在 xcarchive 的 Products/Applications 下；裸 SwiftPM 包可能装到别处，递归兜底
+APP_BUNDLE="$(find "${ARCHIVE}/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -1 || true)"
 if [ -z "${APP_BUNDLE}" ]; then
-  echo "ERROR: no .app in archive Products/Applications"
-  echo "==> archive contents:"
-  find "${ARCHIVE}" -maxdepth 3 -type d | head -40
+  echo "WARN: no .app under Products/Applications, searching whole archive..."
+  APP_BUNDLE="$(find "${ARCHIVE}" -type d -name '*.app' | head -1 || true)"
+fi
+if [ -z "${APP_BUNDLE}" ]; then
+  echo "ERROR: no .app anywhere in archive"
   exit 1
 fi
 echo "==> found .app: ${APP_BUNDLE}"
