@@ -2,10 +2,10 @@
 // CENC-AES-CTR mp4 解密（番茄短剧 progressive mp4，非 fragmented）。
 // 忠实移植 gorgon_py/cenc_decrypt.py：解析 moov→trak→mdia→minf→stbl 下的
 // stsz/stsc/stco(co64)/senc，逐样本用其 IV 做 AES-128-CTR 整样本解密。
-// CTR 不能用 CryptoKit 的 AES.GCM，这里用 CommonCrypto 的 CCCryptorCreateWithMode(kCCModeCTR)。
+// CTR 不能用 CryptoKit 的 AES.GCM，这里用 CryptoKit 的 AES.BlockFunction 手写 CTR keystream。
 
 import Foundation
-import CommonCrypto
+import CryptoKit
 
 public enum CENCError: Error, LocalizedError {
     case noMoov
@@ -257,43 +257,29 @@ public enum CENCDecryptor {
         return Data(buf)
     }
 
-    // MARK: - AES-128-CTR（CommonCrypto；CTR 加密=解密）
+    // MARK: - AES-128-CTR（CryptoKit 手写 CTR；CTR 加密=解密）
 
     /// 用 iv（8 字节）构造 16B 计数器 = iv + 8 字节 big-endian 从 0 起，对整段 data 做 CTR XOR。
+    /// 用 CryptoKit 的 AES.BlockFunction 逐计数器块生成 keystream，避免 CommonCrypto 在
+    /// framework target 里的导入/链接问题。
     static func ctrCrypt(key: Data, iv: [UInt8], data: [UInt8]) throws -> [UInt8] {
         guard !data.isEmpty else { return data }
-        // 计数器块：IV(8) 左对齐 + 8 字节计数器从 0 起
-        var counter = [UInt8](repeating: 0, count: 16)
-        for i in 0..<min(iv.count, 16) { counter[i] = iv[i] }
-
-        var cryptor: CCCryptorRef?
-        // CTR 无 padding；加密=解密，此处用 kCCDecryptMode（与参考一致）
-        var status = counter.withUnsafeBytes { cBuf -> CCCryptorStatus in
-            key.withUnsafeBytes { kBuf -> CCCryptorStatus in
-                CCCryptorCreateWithMode(
-                    CCOperation(kCCDecryptMode), CCMode(kCCModeCTR),
-                    CCAlgorithm(kCCAlgorithmAES), CCPadding(ccNoPadding),
-                    cBuf.baseAddress!, kBuf.baseAddress!, key.count,
-                    nil, 0, 0, &cryptor)
-            }
-        }
-        guard status == kCCSuccess, let ref = cryptor else {
-            throw CENCError.cryptoFailed(status)
-        }
-        defer { CCCryptorRelease(ref) }
-
+        let keyBytes = [UInt8](key)
         var out = [UInt8](repeating: 0, count: data.count)
-        var moved = 0
-        status = data.withUnsafeBytes { inBuf -> CCCryptorStatus in
-            out.withUnsafeMutableBytes { outBuf -> CCCryptorStatus in
-                CCCryptorUpdate(ref,
-                                inBuf.baseAddress!, data.count,
-                                outBuf.baseAddress!, out.count, &moved)
-            }
-        }
-        guard status == kCCSuccess else { throw CENCError.cryptoFailed(status) }
-        if moved < out.count {
-            out.removeLast(out.count - moved)
+        var counter: UInt64 = 0
+        var offset = 0
+        while offset < data.count {
+            // 计数器块：IV(8) 左对齐 + 8 字节 big-endian 计数器
+            var block = [UInt8](repeating: 0, count: 16)
+            for i in 0..<min(iv.count, 8) { block[i] = iv[i] }
+            for i in 0..<8 { block[8 + i] = UInt8((counter >> (8 * (7 - i))) & 0xFF) }
+
+            var enc = AES.BlockFunction(keyBytes, block)
+            let ks = withUnsafeBytes(of: &enc) { Array($0.prefix(16)) }
+            let n = min(16, data.count - offset)
+            for i in 0..<n { out[offset + i] = data[offset + i] ^ ks[i] }
+            offset += n
+            counter &+= 1
         }
         return out
     }
