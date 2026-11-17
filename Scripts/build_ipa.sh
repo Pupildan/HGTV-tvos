@@ -23,27 +23,19 @@ swift --version
 echo "==> tvOS SDK"
 xcrun --sdk appletvos --show-sdk-path
 
-echo "==> resolving package dependencies"
+echo "==> resolving package dependencies (local SwiftPM package referenced by project)"
 swift package resolve
 
-echo "==> detecting available schemes"
-# xcodebuild 对裸 SwiftPM 包自动生成的 scheme 名可能是 HGTV / HGTV-Package / HGTVCore。
-# 注意：xcodebuild -list 输出每行有前导空格，须先 trim 再精确匹配。
-SCHEME_LIST="$(xcodebuild -list 2>/dev/null | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | xargs -I{} echo {} || true)"
-echo "available schemes: ${SCHEME_LIST//$'\n'/, }"
-if echo "${SCHEME_LIST}" | grep -qx "${SCHEME}"; then
-  :
-elif echo "${SCHEME_LIST}" | grep -qx "${SCHEME}-Package"; then
-  SCHEME="${SCHEME}-Package"
-else
-  SCHEME="$(echo "${SCHEME_LIST}" | head -1)"
-fi
-echo "==> using scheme: ${SCHEME}"
+echo "==> schemes in HGTV.xcodeproj"
+xcodebuild -project HGTV.xcodeproj -list 2>/dev/null || true
 
-echo "==> xcodebuild archive (${CONFIG}, tvOS device arm64)"
+echo "==> xcodebuild archive (project HGTV.xcodeproj, ${CONFIG}, tvOS device arm64)"
 rm -rf "${ARCHIVE}"
+# 用真正的 Xcode app 工程（HGTV.xcodeproj）归档，产出规范 tvOS .app。
+# 裸 SwiftPM 可执行包 archive 出来是命令行工具（usr/local/bin），不是 .app。
 xcodebuild archive \
-  -scheme "${SCHEME}" \
+  -project HGTV.xcodeproj \
+  -scheme HGTV \
   -configuration "${CONFIG}" \
   -destination 'generic/platform=tvOS' \
   -archivePath "${ARCHIVE}" \

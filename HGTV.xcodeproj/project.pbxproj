@@ -1,0 +1,249 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 76;
+	objects = {
+
+/* Begin PBXFileReference section */
+		45HGTV0001 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = text; name = Package.swift; path = Package.swift; sourceTree = "<group>"; };
+		45HGTV0002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = tvOS/Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		45HGTVGRP1 = {
+			isa = PBXGroup;
+			children = (
+				45HGTV0001 /* Package.swift */,
+				45HGTV0002 /* Info.plist */,
+				45HGTVGRP2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		45HGTVGRP2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				45HGTVPROD1 /* HGTV.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		45HGTVTGT1 /* HGTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 45HGTVBCL1 /* Build configuration list for PBXNativeTarget "HGTV" */;
+			buildPhases = (
+				45HGTVSOURCES1 /* Sources */,
+				45HGTVFRAMEWORKS1 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+			);
+			name = HGTV;
+			packageProductDependencies = (
+				45HGTVPKG1 /* HGTVPackage */,
+			);
+			productName = HGTV;
+			productReference = 45HGTVPROD1 /* HGTV.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		45HGTVPROJ1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					45HGTVTGT1 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 45HGTVPROJBCL1 /* Build configuration list for PBXProject "HGTV" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 45HGTVGRP1;
+			minimizedProjectReferenceProxies = (
+			);
+			packageReferences = (
+				45HGTVPKGREF1 /* XCLocalSwiftPackageReference "HGTV" */,
+			);
+			productRefGroup = 45HGTVGRP2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				45HGTVTGT1 /* HGTV */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		45HGTVSOURCES1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		45HGTVFRAMEWORKS1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		45HGTVPROJDBG1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = appletvos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		45HGTVPROJREL1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = appletvos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		45HGTVTGTDBG1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = NO;
+				CURRENT_PROJECT_VERSION = 78;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = tvOS/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.3.7.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hgtv.star.tvos;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		45HGTVTGTREL1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = NO;
+				CURRENT_PROJECT_VERSION = 78;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = tvOS/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.3.7.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hgtv.star.tvos;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		45HGTVPROJBCL1 /* Build configuration list for PBXProject "HGTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				45HGTVPROJDBG1 /* Debug */,
+				45HGTVPROJREL1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		45HGTVBCL1 /* Build configuration list for PBXNativeTarget "HGTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				45HGTVTGTDBG1 /* Debug */,
+				45HGTVTGTREL1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		45HGTVPKGREF1 /* XCLocalSwiftPackageReference "HGTV" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ".";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		45HGTVPKG1 /* HGTVPackage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 45HGTVPKGREF1 /* XCLocalSwiftPackageReference "HGTV" */;
+			productName = HGTV;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXFileReference product */
+		45HGTVPROD1 /* HGTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HGTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference product */
+
+	};
+	rootObject = 45HGTVPROJ1 /* Project object */;
+}
