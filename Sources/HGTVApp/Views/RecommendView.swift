@@ -279,7 +279,7 @@ struct RecommendView: View {
             Color.black
             // 仅当前页挂播放器（LazyVStack 按需渲染，非当前页复用同一个 AVPlayer）
             if isCurrent, let player = model.player {
-                VideoPlayer(player: player)
+                PlayerLayerView(player: player)
                     .ignoresSafeArea()
                     .clipped()
             } else {
@@ -320,6 +320,31 @@ struct RecommendView: View {
                 )
             }
             .frame(width: size.width, height: size.height)
+        }
+    }
+}
+
+/// tvOS 上 SwiftUI 的 VideoPlayer 常不渲染视频输出，改用 AVPlayerLayer 的
+/// UIViewRepresentable，直接把 AVPlayer 挂到 layer 上，保证画面出来。
+struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    final class PlayerContainerView: UIView {
+        override static var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
+        view.backgroundColor = .black
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        if uiView.playerLayer.player !== player {
+            uiView.playerLayer.player = player
         }
     }
 }
