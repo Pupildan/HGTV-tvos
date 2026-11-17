@@ -96,7 +96,8 @@ final class RecommendViewModel {
             return
         }
 
-        playbackTask?.cancel()
+        // 不取消进行中的下载：让 fetch/下载/解密跑完并写入缓存（秒开），
+        // 末尾用 currentIndex 判断是否仍是当前集再切换播放器，避免快速滑动反复取消下载。
         errorMessage = nil
         isLoading = true
         defer { isLoading = false }
@@ -135,14 +136,18 @@ final class RecommendViewModel {
                 DiagnosticsLogger.log("AVPlayer.play() 已调用 vid=\(vid)", category: "playback", level: .info)
                 self.prefetchNext()
             } catch let e as HTTPError {
+                DiagnosticsLogger.log("播放失败 HTTPError: \(e.errorDescription)", category: "playback", level: .error)
                 self.errorMessage = e.errorDescription
             } catch let e as SpadeKeyError {
+                DiagnosticsLogger.log("播放失败 SpadeKey: \(e.errorDescription)", category: "playback", level: .error)
                 self.errorMessage = e.errorDescription
             } catch let e as CENCError {
+                DiagnosticsLogger.log("播放失败 CENC: \(e.errorDescription)", category: "playback", level: .error)
                 self.errorMessage = e.errorDescription
             } catch is CancellationError {
-                // 快速滑动取消，忽略
+                DiagnosticsLogger.log("播放任务被取消", category: "playback", level: .warn)
             } catch {
+                DiagnosticsLogger.log("播放失败: \(error.localizedDescription)", category: "playback", level: .error)
                 self.errorMessage = error.localizedDescription
             }
         }
