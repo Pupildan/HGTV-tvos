@@ -39,8 +39,10 @@ public enum DeviceRegisterError: Error {
 /// 设备注册 + 持久化存取（跨 actor 共享）
 public final class DeviceRegistrar: @unchecked Sendable {
     private let signer: RequestSigner
-    private let host = "https://appapi2.phoenixfm.com"
-    private let path = "/service/2/device_register/"
+    // 设备注册 host：严格用原 APK dex 里的 log5-applog-lf.fqnovel.com（此前误用
+    // appapi2.phoenixfm.com，TLS 连不上导致设备注册失败、后续接口返回空）。
+    private let host = "https://" + HGTVConfig.Host.deviceRegister
+    private let path = HGTVConfig.Path.deviceRegister
 
     public private(set) var registration: DeviceRegistration?
     public static let persistenceKey = "HGTV.device.registration"
