@@ -10,7 +10,9 @@ let package = Package(
         .tvOS(.v26)
     ],
     products: [
-        .executable(name: "HGTV", targets: ["HGTVApp"]),
+        // 纯 library：界面层 HGTV（含 @main 入口）+ 数据层 HGTVCore。
+        // 不声明 executable product，避免与 Xcode app target 的 HGTV.app 产物冲突。
+        .library(name: "HGTV", targets: ["HGTVApp"]),
         .library(name: "HGTVCore", targets: ["HGTVCore"])
     ],
     targets: [
@@ -23,8 +25,8 @@ let package = Package(
                 .swiftLanguageMode(.v6)
             ]
         ),
-        // 界面层：tvOS 26 SwiftUI + 液态玻璃 + AVPlayer
-        .executableTarget(
+        // 界面层：tvOS 26 SwiftUI + 液态玻璃 + AVPlayer（@main 入口在此，作为 library 被 app target 链接）
+        .target(
             name: "HGTVApp",
             dependencies: ["HGTVCore"],
             path: "Sources/HGTVApp",
