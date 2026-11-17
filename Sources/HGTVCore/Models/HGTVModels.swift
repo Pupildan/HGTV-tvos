@@ -26,8 +26,10 @@ public struct APIEnvelope<T: Decodable>: Decodable {
 // MARK: - 剧集条目（书 / 短剧）
 public struct DramaItem: Identifiable, Codable, Hashable {
     // id 只依赖存储属性，避免在 Hashable 合成 hash 里访问 hashValue 造成递归
-    public var id: String { bookId ?? title ?? "" }
+    public var id: String { bookId ?? videoId ?? title ?? "" }
     public let bookId: String?
+    public let videoId: String?
+    public let seriesId: String?
     public let title: String?
     public let thumbURL: URL?
     public let description: String?
@@ -35,10 +37,48 @@ public struct DramaItem: Identifiable, Codable, Hashable {
     public let playCount: Int?
     public let score: Double?
 
+    public init(bookId: String?, videoId: String? = nil, seriesId: String? = nil,
+                title: String?, thumbURL: URL?, description: String?,
+                category: String?, playCount: Int?, score: Double?) {
+        self.bookId = bookId
+        self.videoId = videoId
+        self.seriesId = seriesId
+        self.title = title
+        self.thumbURL = thumbURL
+        self.description = description
+        self.category = category
+        self.playCount = playCount
+        self.score = score
+    }
+
     enum CodingKeys: String, CodingKey {
         case bookId = "book_id"
-        case title, thumbURL = "thumb_url", description, category
-        case playCount = "play_count", score
+        case videoId = "vid"
+        case seriesId = "series_id"
+        case title, thumbURL = "cover", description = "video_desc", category
+        case playCount = "play_cnt", score
+    }
+}
+
+// MARK: - 书城 tab 的嵌套剧目（bookmall/tab，真实剧在 video_data 里）
+public struct BookmallVideo: Decodable {
+    public let vid: String?
+    public let seriesId: String?
+    public let title: String?
+    public let cover: URL?
+    public let videoDesc: String?
+    public let playCount: Int?
+    public let score: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case vid, seriesId = "series_id", title, cover
+        case videoDesc = "video_desc", playCount = "play_cnt", score
+    }
+
+    public var dramaItem: DramaItem {
+        DramaItem(bookId: nil, videoId: vid, seriesId: seriesId, title: title,
+                  thumbURL: cover, description: videoDesc, category: nil,
+                  playCount: playCount, score: score)
     }
 }
 

@@ -36,8 +36,8 @@ public final class APIService: Sendable {
     // 公共参数（aid/version/device_id/token/ts/_rticket）由 SignInterceptor 统一注入，
     // 这里只传业务参数，避免与 CommonParams.query 重复。
 
-    // 内容源：/reading/bookapi/bookmall/tab/v —— 开发机已验证返回 62KB 真实数据
-    //（分类导航 + 真实短剧名）。landpage 端点对原 APK 也返回空，故弃用。
+    // 内容源：/reading/bookapi/bookmall/tab/v —— 开发机已验证返回 ~65KB 真实数据
+    //（真实剧在任意嵌套深度的 video_data 里：title/cover/video_desc/series_id）。
     public func fetchHome() async throws -> [CategoryGroup] {
         let target = HTTPTargetImpl(
             host: HGTVConfig.Host.fqnovel,
@@ -45,10 +45,45 @@ public final class APIService: Sendable {
             query: [:],
             signed: true
         )
-        let env = try await http.request(target, as: APIEnvelope<BookmallData>.self)
-        // 把每个 tab 映射为一个分类组，tab 里的剧目 cell 展开成 DramaItem
-        let tabs = env.data?.tabItem ?? []
-        return [CategoryGroup(id: "bookmall", name: "精选", items: tabs.map(\.dramaItem))]
+        let raw = try await http.request(target)
+        let dramas = Self.extractVideos(from: raw)
+        return [CategoryGroup(id: "bookmall", name: "精选", items: dramas)]
+    }
+
+    /// 递归提取响应里所有 video_data[] 节点，映射成 DramaItem。
+    static func extractVideos(from data: Data) -> [DramaItem] {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        var out: [DramaItem] = []
+        var seen = Set<String>()
+        func walk(_ node: Any) {
+            if let dict = node as? [String: Any] {
+                if let videos = dict["video_data"] as? [[String: Any]] {
+                    for v in videos {
+                        let title = v["title"] as? String
+                        let vid = v["vid"] as? String
+                        let key = vid ?? title ?? ""
+                        guard !key.isEmpty, !seen.contains(key) else { continue }
+                        seen.insert(key)
+                        let cover = (v["cover"] as? String).flatMap(URL.init(string:))
+                        out.append(DramaItem(
+                            bookId: nil,
+                            videoId: vid,
+                            seriesId: v["series_id"] as? String,
+                            title: title,
+                            thumbURL: cover,
+                            description: v["video_desc"] as? String,
+                            category: nil,
+                            playCount: v["play_cnt"] as? Int,
+                            score: v["score"] as? Double))
+                    }
+                }
+                for (_, val) in dict { walk(val) }
+            } else if let arr = node as? [Any] {
+                for item in arr { walk(item) }
+            }
+        }
+        walk(obj)
+        return out
     }
 
     public func fetchCategories() async throws -> CategoryLandpage {
