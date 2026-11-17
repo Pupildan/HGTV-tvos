@@ -197,7 +197,7 @@ struct DramaDetailView: View {
                 )
         }
         .buttonStyle(.card)
-        .focused($focusedEpisode, value: idx)
+        .focused($focusedEpisode, equals: idx)
     }
 
     private func errorView(_ message: String) -> some View {
@@ -293,8 +293,8 @@ struct EpisodePlayerSheet: View {
 struct MenuDismiss: UIViewRepresentable {
     let onMenu: () -> Void
 
-    func makeUIView() -> MenuCatchView { MenuCatchView() }
-    func updateUIView(_ v: MenuCatchView) { v.onMenu = onMenu }
+    func makeUIView(context: Context) -> MenuCatchView { MenuCatchView() }
+    func updateUIView(_ v: MenuCatchView, context: Context) { v.onMenu = onMenu }
 
     final class MenuCatchView: UIView {
         var onMenu: () -> Void = {}

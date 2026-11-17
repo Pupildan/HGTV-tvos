@@ -325,11 +325,13 @@ final class DYPlayerViewController: UIViewController {
         override var canBecomeFocused: Bool { true }
 
         override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
-            if context.direction.contains(.left) || context.direction.contains(.right) {
-                onDirection?(context.direction)
+            // tvOS：方向属性是 focusHeading（UIFocusHeading OptionSet）
+            let heading = context.focusHeading
+            if heading.contains(.left) || heading.contains(.right) {
+                onDirection?(heading)
                 return false
             }
-            if context.direction.contains(.up) || context.direction.contains(.down) {
+            if heading.contains(.up) || heading.contains(.down) {
                 return false // 上下按需求不作为切换入口，吞掉保持焦点稳定
             }
             return super.shouldUpdateFocus(in: context)
