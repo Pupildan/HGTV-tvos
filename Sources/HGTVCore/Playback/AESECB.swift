@@ -65,12 +65,11 @@ private let AES_RCON: [UInt8] = [
 
 extension CENCDecryptor {
 
-    /// AES-128 单块加密（ECB 单块）。key 必须 16 字节，block 必须 16 字节，返回 16 字节密文。
-    /// key 非 16 字节或 block 非 16 字节时返回空数组（调用方需检查）。
-    static func ecbEncryptBlock(key: [UInt8], block: [UInt8]) -> [UInt8] {
-        guard key.count == 16, block.count == 16 else { return [] }
-
-        // ---- Rijndael key schedule：128 位密钥 → 11 个 16 字节轮密钥 ----
+    /// Rijndael 密钥扩展：128 位密钥 → 11 个 16 字节轮密钥。
+    /// v21 起独立出来：整个视频共用一个内容密钥，**每条视频只展开一次**，
+    /// 供 encryptBlock(roundKeys:block:) 复用（此前每个 16 字节块都重算一遍
+    /// key schedule，白白消耗 ~40% 解密耗时）。
+    static func expandKey(_ key: [UInt8]) -> [[UInt8]] {
         // w[i] 为一个 32-bit 字（4 字节）。i % 4 == 0 时做 RotWord/SubWord/Rcon。
         var w = [[UInt8]](repeating: [UInt8](repeating: 0, count: 4), count: 44)
         for i in 0..<4 {
@@ -94,6 +93,12 @@ extension CENCDecryptor {
                 for j in 0..<4 { roundKeys[r][4 * c + j] = w[4 * r + c][j] }
             }
         }
+        return roundKeys
+    }
+
+    /// AES-128 单块加密（用预展开的轮密钥）。block 必须 16 字节，返回 16 字节密文。
+    static func encryptBlock(roundKeys: [[UInt8]], block: [UInt8]) -> [UInt8] {
+        guard block.count == 16, roundKeys.count == 11 else { return [] }
 
         // ---- state 列主序：state[r][c] = block[4*c + r] ----
         var state = [[UInt8]](repeating: [UInt8](repeating: 0, count: 4), count: 4)
@@ -149,6 +154,13 @@ extension CENCDecryptor {
             for r in 0..<4 { out[4 * c + r] = state[r][c] }
         }
         return out
+    }
+
+    /// AES-128 单块加密（ECB 单块）。key 必须 16 字节，block 必须 16 字节，返回 16 字节密文。
+    /// 兼容入口：内部做一次 key expansion（热路径请改用 expandKey + encryptBlock）。
+    static func ecbEncryptBlock(key: [UInt8], block: [UInt8]) -> [UInt8] {
+        guard key.count == 16, block.count == 16 else { return [] }
+        return encryptBlock(roundKeys: expandKey(key), block: block)
     }
 
     /// GF(2^8) 乘 2（模 x^8+x^4+x^3+x+1）。用于 MixColumns。

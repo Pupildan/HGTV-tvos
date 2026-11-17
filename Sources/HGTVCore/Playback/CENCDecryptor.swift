@@ -238,11 +238,15 @@ public enum CENCDecryptor {
 
     /// 返回解密后的 mp4 data。对每个 trak 的每个样本用其 IV 做 AES-CTR 整样本解密。
     /// 解密后额外做 AVPlayer 兼容清理（见 sanitizeForAVPlayer）。
+    /// v21：整个视频共用一个内容密钥 → key schedule 在此展开一次传入 ctrCrypt。
     public static func decrypt(data: Data, key: Data) throws -> Data {
         var buf = [UInt8](data)
         guard let moov = findBox(buf, "moov") else { throw CENCError.noMoov }
         let (moovOff, moovSize) = moov
         let moovHdr = (Int(be32(buf, moovOff)) == 1) ? 16 : 8
+        let keyBytes = [UInt8](key)
+        guard keyBytes.count == 16 else { throw CENCError.keySizeInvalid }
+        let schedule = expandKey(keyBytes)
         for b in iterBoxes(buf, moovOff + moovHdr, moovOff + moovSize) {
             if b.type == "trak" {
                 guard let tbls = parseTrackTables(buf, b.offset, b.offset + b.size),
@@ -253,7 +257,7 @@ public enum CENCDecryptor {
                     let soff = s.offset
                     let ssize = s.size
                     guard soff >= 0, ssize >= 0, soff + ssize <= buf.count else { continue }
-                    let plain = try ctrCrypt(key: key, iv: iv, data: Array(buf[soff..<(soff + ssize)]))
+                    let plain = try ctrCrypt(schedule: schedule, iv: iv, data: Array(buf[soff..<(soff + ssize)]))
                     buf.replaceSubrange(soff..<(soff + ssize), with: plain)
                 }
             }
@@ -353,18 +357,16 @@ public enum CENCDecryptor {
     /// CENC 8 字节 IV → CTR 解密。CENC 计数器块 = IV(8) + 8 字节 big-endian 从 0 起，
     /// keystream 块 k = AES-ECB(IV || k)。首块计数器是 IV||0x0000000000000000（counter_0）。
     ///
+    /// v21：接受预展开轮密钥（每视频展开一次，避免逐块重算 key schedule）。
+    /// 兼容入口见下方 ctrCrypt(key:iv:data:)。
+    ///
     /// ⚠️ 不要用 CryptoKit 的 AES.GCM 生成 keystream：12 字节 nonce 时 GCM 计数器只在
     /// 末 4 字节递增，且首数据块固定从 J0+1（=nonce||0x00000002）开始，只能产出
     /// counter_2、counter_3…，永远给不出 counter_0/counter_1，且字节布局也不对。
     /// CommonCrypto 在本 target 不可用，故用纯 Swift 手写 AES-128-ECB 单块加密，
     /// 逐 16 字节计数器块生成 keystream，再 XOR 到 data。
-    static func ctrCrypt(key: Data, iv: [UInt8], data: [UInt8]) throws -> [UInt8] {
+    static func ctrCrypt(schedule: [[UInt8]], iv: [UInt8], data: [UInt8]) throws -> [UInt8] {
         guard !data.isEmpty else { return data }
-
-        let keyBytes = [UInt8](key)
-        guard keyBytes.count == 16 else {
-            throw CENCError.keySizeInvalid
-        }
 
         // 16 字节计数器块 = IV(8) + 8 字节 big-endian 计数器（从 0 起）
         var counter = [UInt8](repeating: 0, count: 16)
@@ -375,7 +377,7 @@ public enum CENCDecryptor {
         var blockStart = 0
         while blockStart < data.count {
             // keystream 块 = AES-128-ECB(key, 当前计数器块)
-            let keystream = ecbEncryptBlock(key: keyBytes, block: counter)
+            let keystream = encryptBlock(roundKeys: schedule, block: counter)
             guard keystream.count == 16 else {
                 throw CENCError.keySizeInvalid
             }
@@ -389,6 +391,13 @@ public enum CENCDecryptor {
             blockStart = blockEnd
         }
         return out
+    }
+
+    /// 兼容入口：临时密钥场景（非热路径）用。
+    static func ctrCrypt(key: Data, iv: [UInt8], data: [UInt8]) throws -> [UInt8] {
+        let keyBytes = [UInt8](key)
+        guard keyBytes.count == 16 else { throw CENCError.keySizeInvalid }
+        return try ctrCrypt(schedule: expandKey(keyBytes), iv: iv, data: data)
     }
 
     // MARK: - 字节读取助手（big-endian / latin1）

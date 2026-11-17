@@ -43,6 +43,8 @@ final class PlayerManager {
     // MARK: - 池窗口
 
     /// 维持 ±2 窗口。驱逐越界、补齐窗口内缺失。
+    /// v21 起居中条**始终优先**：先只加载居中条，邻居延后到居中条 ready 才补
+    /// （原实现邻居与居中并行下载抢带宽，真机实测居中起播被拖慢一半以上）。
     func prepare(center index: Int) {
         let count = itemCount()
         guard count > 0 else { return }
@@ -56,31 +58,35 @@ final class PlayerManager {
             evict(index: key)
         }
 
-        // 2) 冷启动：池全空只装载居中条，邻居推迟
-        if players.isEmpty {
-            pendingNeighbors = Array((lower...upper).filter { $0 != clamped })
+        // 2) 居中条缺失：只加载居中条，邻居按由近及远排队等居中 ready 再补。
+        if players[clamped] == nil {
+            pendingNeighbors = Array((lower...upper).filter {
+                $0 != clamped && players[$0] == nil && !acquiring.contains($0)
+            }.sorted { abs($0 - clamped) < abs($1 - clamped) })
             Task { await self.acquire(index: clamped) }
             return
         }
 
-        // 3) 补齐窗口内缺失（居中优先）。acquiring 防重入：建池中的 index 不重复建。
-        if players[clamped] == nil, !acquiring.contains(clamped) {
-            Task { await self.acquire(index: clamped) }
-        }
-        for i in lower...upper where i != clamped && players[i] == nil && !acquiring.contains(i) {
-            Task { await self.acquire(index: i) }
+        // 3) 居中已在池：若尚未 ready 则排队等 ready；已 ready 立即补邻居。
+        if players[clamped]?.currentItem?.status == .readyToPlay {
+            drainPendingNeighbors(lower: lower, upper: upper, clamped: clamped)
+        } else {
+            pendingNeighbors = Array((lower...upper).filter {
+                $0 != clamped && players[$0] == nil && !acquiring.contains($0)
+            }.sorted { abs($0 - clamped) < abs($1 - clamped) })
         }
     }
 
-    /// 冷启动邻居补齐（居中 ready 后调用）。
-    private func drainPendingNeighbors() {
-        guard !pendingNeighbors.isEmpty else { return }
-        let batch = pendingNeighbors
+    /// 补齐窗口内缺失的邻居（由近及远）。acquiring 防重入。
+    private func drainPendingNeighbors(lower: Int, upper: Int, clamped: Int) {
+        let batch = pendingNeighbors.filter { $0 >= lower && $0 <= upper && players[$0] == nil && !acquiring.contains($0) }
         pendingNeighbors.removeAll()
-        DiagnosticsLogger.log("冷启动收敛：补齐邻居 \(batch)", category: "playback", level: .debug)
+        guard !batch.isEmpty else { return }
+        DiagnosticsLogger.log("居中已 ready，补齐邻居 \(batch)", category: "playback", level: .debug)
         for i in batch {
             Task { await self.acquire(index: i) }
         }
+        _ = clamped
     }
 
     /// 纯查询，不 acquire、不驱逐。willDisplay / updatePlaybackStates 都用它。
@@ -196,7 +202,10 @@ final class PlayerManager {
             let vid = vidAt(index) ?? "?"
             DiagnosticsLogger.log("item ready index=\(index) vid=\(vid)", category: "playback", level: .info)
             if index == currentCenter {
-                drainPendingNeighbors()
+                // 居中条 ready：由近及远补齐邻居（邻居此前被延后，避免抢带宽）
+                let lower = max(0, currentCenter - 2)
+                let upper = min(itemCount() - 1, currentCenter + 2)
+                drainPendingNeighbors(lower: lower, upper: upper, clamped: index)
                 // 关键：fast scroll 时 center 切过来时 item 往往还没 ready（走了 pause 分支），
                 // 等 item 真正 readyToPlay 时已没人再触发 play → 停在 paused 黑屏。
                 // 这里补一次 play：当前居中条 ready 即播，确保出画面。

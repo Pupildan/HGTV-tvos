@@ -40,7 +40,12 @@ final class PlaybackEngine {
     var onNeedMore: (() -> Void)?
 
     private var seenVids: Set<String> = []
-    private let feedTabType = 8   // 找剧 tab（抖音式混合流，唯一已打通内容源）
+    /// feed 内容池轮换：4 个 tab 实测内容**完全不相交**（tab8 找剧 9 条 / tab38 真人剧
+    /// 11 条 / tab32 漫剧 10 条 / tab14 电影 16 条，两两交集全为 0）。bookmall 端点
+    /// 不提供翻页（has_more 恒 false），只靠反复请求同一 tab 会得到高度重复的固定
+    /// 内容池；轮换 tab 才有真正多样的无限流。
+    private let feedTabTypes: [Int] = [8, 38, 32, 14]
+    private var feedTabCursor = 0
 
     // MARK: - 本地代理缓存（vid → 解密后明文的本地 URL）
 
@@ -74,13 +79,14 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：拉第一批 feed。失败可重试（items 仍为空时放行）。
+    /// 首次加载：拉第一批 feed（找剧 tab）。失败可重试（items 仍为空时放行）。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            let groups = try await APIService.shared.fetchHome(tabType: feedTabType)
+            let groups = try await APIService.shared.fetchHome(tabType: feedTabTypes[0])
+            feedTabCursor = 1
             let added = merge(groups.flatMap { $0.items ?? [] })
             if added.isEmpty {
                 errorMessage = "暂无推荐内容"
@@ -96,16 +102,17 @@ final class PlaybackEngine {
         }
     }
 
-    /// 无限 feed：反复请求同一 URL，按 vid 去重后追加。
+    /// 无限 feed：按 tab 轮换请求（8→38→32→14 循环），按 vid 去重后追加。
     func loadMore() async {
         guard !isLoadingMore else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let groups = try await APIService.shared.fetchHome(tabType: feedTabType)
+            let tab = feedTabTypes[feedTabCursor % feedTabTypes.count]
+            feedTabCursor += 1
+            let groups = try await APIService.shared.fetchHome(tabType: tab)
             let added = merge(groups.flatMap { $0.items ?? [] })
-            guard !added.isEmpty else { return }
-            DiagnosticsLogger.log("追加 feed +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
+            DiagnosticsLogger.log("追加 feed(tab=\(tab)) +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
         } catch {
             // 追加失败静默（保留现有流），仅记日志。
             DiagnosticsLogger.warn("追加 feed 失败: \(error.localizedDescription)", category: "playback")

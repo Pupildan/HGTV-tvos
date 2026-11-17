@@ -255,7 +255,26 @@ public final class APIService: Sendable {
     }
 
     /// 下载加密 mp4（CDN 直链，无需签名，跟随重定向）。
+    /// v21：大文件走 4 分片并发 Range 下载（真机实测设备端单连接仅 ~1.2MB/s，
+    /// 并发分片可摊薄限速/抖动；PC 实测 CDN 单连接可达 23MB/s），每片自带一次重试；
+    /// 探测不到大小或分片结果不符时回退单流整下。
     public func downloadData(from url: URL) async throws -> Data {
+        // 1) 探测总大小（Range 0-0 读 Content-Range）
+        if let total = try? await Self.probeContentLength(url: url, session: Self.downloadSession),
+           total > Self.parallelChunkThreshold {
+            // 2) 并发分片
+            if let joined = try? await Self.parallelRangeDownload(url: url, total: total, session: Self.downloadSession),
+               joined.count == total {
+                return joined
+            }
+            // 分片失败 → 落到单流
+        }
+        // 3) 单流整下（兼容路径）
+        return try await downloadDataSingle(from: url)
+    }
+
+    /// 单流整下（原实现）。
+    private func downloadDataSingle(from url: URL) async throws -> Data {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.setValue(HGTVConfig.userAgent(), forHTTPHeaderField: HGTVConfig.HeaderKey.userAgent)
@@ -269,6 +288,87 @@ public final class APIService: Sendable {
             throw HTTPError.catalogHTTP((resp as? HTTPURLResponse)?.statusCode ?? -1)
         }
         return data
+    }
+
+    // MARK: - 并发分片下载
+
+    /// 大于该字节数才走并发分片（避免小请求白探一次）。
+    private static let parallelChunkThreshold: Int = 4_000_000
+    /// 并发分片数。
+    private static let chunkCount: Int = 4
+
+    private static func probeContentLength(url: URL, session: URLSession) async throws -> Int? {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+        req.setValue(HGTVConfig.userAgent(), forHTTPHeaderField: HGTVConfig.HeaderKey.userAgent)
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { return nil }
+        // 206 + Content-Range: bytes 0-0/<total>
+        if let cr = http.value(forHTTPHeaderField: "Content-Range"),
+           let total = cr.split(separator: "/").last, let n = Int(total), n > 0 {
+            _ = data
+            return n
+        }
+        // 不支持 Range：看 Content-Length（一次性返回全量也可用）
+        if http.statusCode == 200, let len = http.expectedContentLength, len > 0 {
+            return Int(len)
+        }
+        return nil
+    }
+
+    private static func parallelRangeDownload(url: URL, total: Int, session: URLSession) async throws -> Data {
+        let n = chunkCount
+        let seg = total / n
+        var ranges: [(Int, Int)] = []
+        for i in 0..<n {
+            let start = i * seg
+            let end = (i == n - 1) ? total - 1 : (i + 1) * seg - 1
+            ranges.append((start, end))
+        }
+        // 并发拉各分片，每片失败重试一次（提升稳定性）
+        var parts = [Data?](repeating: nil, count: n)
+        try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+            for (i, r) in ranges.enumerated() {
+                group.addTask {
+                    let bytes = try await Self.fetchRange(url: url, start: r.0, end: r.1, session: session)
+                    return (i, bytes)
+                }
+            }
+            for try await (i, bytes) in group {
+                parts[i] = bytes
+            }
+        }
+        // 缺片重试一次
+        for (i, r) in ranges.enumerated() where parts[i] == nil {
+            parts[i] = try? await Self.fetchRange(url: url, start: r.0, end: r.1, session: session)
+        }
+        guard parts.allSatisfy({ $0 != nil }) else { throw HTTPError.network(NSError(domain: "hgtv.download", code: -1)) }
+        var joined = Data()
+        joined.reserveCapacity(total)
+        for p in parts { joined.append(p!) }
+        return joined
+    }
+
+    private static func fetchRange(url: URL, start: Int, end: Int, session: URLSession) async throws -> Data {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+        req.setValue(HGTVConfig.userAgent(), forHTTPHeaderField: HGTVConfig.HeaderKey.userAgent)
+        do {
+            let (data, resp) = try await session.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw HTTPError.catalogHTTP((resp as? HTTPURLResponse)?.statusCode ?? -1)
+            }
+            return data
+        } catch {
+            // 重试一次（抖动容错）
+            let (data, resp) = try await session.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw HTTPError.catalogHTTP((resp as? HTTPURLResponse)?.statusCode ?? -1)
+            }
+            return data
+        }
     }
 
     /// 下载专用会话（独立于签名 HTTPClient，CDN 直链用）
