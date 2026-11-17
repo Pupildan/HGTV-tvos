@@ -6,11 +6,18 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# 并发保护：同一分支新提交时取消旧构建
+concurrency:
+  group: build-tvos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build unsigned tvOS ipa
-    runs-on: macos-latest   # macOS 26 arm64（文档确认有效标签），带最新 Xcode
+    runs-on: macos-latest   # macOS 26 arm64，带最新 Xcode
     timeout-minutes: 40
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -29,7 +36,6 @@ jobs:
 
       - name: Select Xcode
         run: |
-          # 优先 Xcode 26，退回默认
           if [ -d /Applications/Xcode_26.app ]; then
             sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
           else
@@ -39,10 +45,15 @@ jobs:
           swift --version
 
       - name: Build + package unsigned ipa
+        env:
+          # 版本号：GitHub 每次构建自动 +1 的自然数，作为 v{N} 注入 ipa 名与 App CFBundleVersion
+          HGTV_VERSION: ${{ github.run_number }}
         run: |
-          chmod +x Scripts/build_ipa.sh
+          chmod +x Scripts/build_ipa.sh Scripts/stamp_version.sh
           set -o pipefail
           ./Scripts/build_ipa.sh 2>&1 | tee build_output.log
+          # 构建后处理：把 v{N} 写进 Info.plist 并重命名为 HGTV-tvOS-v{N}-unsigned.ipa
+          ./Scripts/stamp_version.sh 2>&1 | tee -a build_output.log
 
       - name: Upload build log (always, for debugging)
         if: always()
@@ -56,7 +67,8 @@ jobs:
       - name: Upload unsigned ipa artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HGTV-tvOS-unsigned
-          path: dist/HGTV-tvOS-unsigned.ipa
+          # ipa 命名规范：HGTV-tvOS-v{N}-unsigned.ipa（stamp_version.sh 产出），artifact 名同步带版本
+          name: HGTV-tvOS-v${{ github.run_number }}-unsigned
+          path: dist/HGTV-tvOS-v*-unsigned.ipa
           if-no-files-found: error
           retention-days: 30

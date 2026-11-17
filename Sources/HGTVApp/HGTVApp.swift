@@ -12,6 +12,19 @@ struct HGTVApp: App {
     init() {
         // tvOS 上不做任何隐私弹窗前置（原 APK 的 targetSdk 29 逻辑不适用）；
         // 设备注册在首次联网时异步完成。
+
+        // —— 日志诊断层：注册 TCP 回传通道（Bonjour 自动发现开发机）并启动，整个生命周期保持。
+        //    fire-and-forget，不阻塞启动；Info.plist 未声明本地网络权限时通道会优雅重试，不影响 App。
+        Task {
+            await DiagnosticsLogger.shared.registerTransport(TCPTransport())
+            await DiagnosticsLogger.shared.start()
+
+            let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+            DiagnosticsLogger.info("App 启动 v\(ver) build \(build)", category: "app",
+                                   meta: ["version": ver, "build": build,
+                                          "os": ProcessInfo.processInfo.operatingSystemVersionString])
+        }
     }
 
     var body: some Scene {

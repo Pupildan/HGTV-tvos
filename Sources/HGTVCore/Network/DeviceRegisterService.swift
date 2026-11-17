@@ -40,7 +40,12 @@ public final class DeviceRegisterService: @unchecked Sendable {
     /// 确保已注册。未注册则发起 device_register（走签名拦截器）。
     /// 签名占位阶段此请求会被服务端拒，但流程与接口已对齐原 APK。
     public func ensureRegistered() async throws {
-        if isRegistered { return }
+        if isRegistered {
+            DiagnosticsLogger.info("设备已注册，跳过", category: "device",
+                                   meta: ["device_id": registrar.registration?.deviceID ?? "",
+                                          "install_id": registrar.registration?.installID ?? ""])
+            return
+        }
         let context = SignContext(
             deviceID: registrar.registration?.deviceID ?? "",
             deviceToken: registrar.registration?.deviceToken ?? "",
@@ -54,17 +59,39 @@ public final class DeviceRegisterService: @unchecked Sendable {
         // 预注册占位（首次无 device_id）
         registrar.seed(context: context)
 
-        let signed = try registrar.buildRequest(context: context)
-        let req = signed.toURLRequest()
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let http = resp as? HTTPURLResponse
-        let reg = try registrar.parseResponse(
-            status: http?.statusCode ?? 0,
-            headers: http.map { $0.allHeaderFields as? [String: String] ?? [:] } ?? [:],
-            body: [UInt8](data)
-        )
-        _ = registrar.apply(reg, to: context)
-        Self.persistRegistration(registrar.registration)
+        do {
+            let signed = try registrar.buildRequest(context: context)
+            let req = signed.toURLRequest()
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let http = resp as? HTTPURLResponse
+            DiagnosticsLogger.info("device_register 响应 status=\(http?.statusCode ?? 0) bytes=\(data.count)",
+                                   category: "device")
+            let reg = try registrar.parseResponse(
+                status: http?.statusCode ?? 0,
+                headers: http.map { $0.allHeaderFields as? [String: String] ?? [:] } ?? [:],
+                body: [UInt8](data)
+            )
+            _ = registrar.apply(reg, to: context)
+            Self.persistRegistration(registrar.registration)
+
+            // —— 日志：注册结果（device_id / install_id / device_token 是否拿到）——
+            let final = registrar.registration
+            DiagnosticsLogger.info("设备注册成功", category: "device", meta: [
+                "device_id": final?.deviceID ?? "",
+                "install_id": final?.installID ?? "",
+                "device_token_empty": "\(final?.deviceToken.isEmpty ?? true)",
+                "device_token_len": "\(final?.deviceToken.count ?? 0)",
+            ])
+        } catch {
+            // —— 日志：注册失败 ——
+            let final = registrar.registration
+            DiagnosticsLogger.error("设备注册失败：\(error.localizedDescription)", category: "device", meta: [
+                "device_id": final?.deviceID ?? "",
+                "install_id": final?.installID ?? "",
+                "device_token_empty": "\(final?.deviceToken.isEmpty ?? true)",
+            ])
+            throw error
+        }
     }
 
     /// 清空身份（对应原「恢复出厂 / 重新注册设备」）

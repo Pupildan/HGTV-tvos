@@ -6,6 +6,8 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+// 注：日志诊断层 DiagnosticsLogger 与本文件同属 HGTVCore target，无需 import，直接引用。
+//     Diagnostics 不反向依赖网络层，无循环依赖。
 
 public protocol HTTPTarget {
     var host: String { get }
@@ -113,18 +115,71 @@ public final class HTTPClient: Sendable {
 
         var req = signedReq.toURLRequest()
 
+        // —— 日志：发起前记录 method/url/signed + 全部请求头（fire-and-forget，不影响请求语义）——
+        let isSigned = target.signed
+        let method = signedReq.method
+        let urlStr = signedReq.url
+        let headers = signedReq.headers
+        Self.logRequest(method: method, url: urlStr, signed: isSigned, headers: headers,
+                        bodyLength: signedReq.body?.count)
+
         let data: Data
         let resp: URLResponse
         do {
             (data, resp) = try await session.data(for: req)
         } catch {
+            // —— 日志：抛错 ——
+            DiagnosticsLogger.error("请求失败：\(error.localizedDescription)", category: "http",
+                                    meta: ["method": method, "url": urlStr, "signed": "\(isSigned)"])
             throw HTTPError.network(error)
         }
-        guard let http = resp as? HTTPURLResponse else { throw HTTPError.invalidResponse }
+        guard let http = resp as? HTTPURLResponse else {
+            DiagnosticsLogger.warn("响应非 HTTP：\(urlStr)", category: "http")
+            throw HTTPError.invalidResponse
+        }
+        // —— 日志：收到响应（status / 字节数 / 前若干字节）——
+        Self.logResponse(url: urlStr, status: http.statusCode, data: data)
         guard (200..<300).contains(http.statusCode) else {
+            DiagnosticsLogger.warn("HTTP \(http.statusCode)：\(urlStr)", category: "http")
             throw HTTPError.catalogHTTP(http.statusCode)
         }
         return data
+    }
+
+    // MARK: - 日志挂钩（不影响请求语义，仅观测）
+
+    /// 发起前：记录全部请求头，特别标出签名相关头是否为空。
+    private static func logRequest(method: String, url: String, signed: Bool,
+                                   headers: [String: String], bodyLength: Int?) {
+        let interesting = ["x-gorgon", "x-argus", "x-ladon", "x-khronos", "x-medusa",
+                           "x-helios", "x-ss-stub", "x-ss-dp", "passport-sdk-version", "cookie"]
+        var meta: [String: String] = [
+            "method": method,
+            "url": url,
+            "signed": "\(signed)",
+            "body_len": "\(bodyLength ?? 0)",
+        ]
+        if let bl = bodyLength { meta["has_body"] = "\(bl > 0)" }
+        // 全部请求头（键统一小写便于对拍）
+        for (k, v) in headers {
+            meta["h." + k.lowercased()] = v.isEmpty ? "<empty>" : v
+        }
+        // 签名头是否为空的汇总（一目了然哪个签名头缺失）
+        for key in interesting {
+            let val = headers.first { $0.key.lowercased() == key }?.value
+            meta["sig." + key] = (val?.isEmpty == false) ? "ok" : "EMPTY"
+        }
+        DiagnosticsLogger.info("→ \(method) \(url) signed=\(signed)", category: "http", meta: meta)
+    }
+
+    /// 收到响应：记录 status、字节数、响应前若干字节（便于看报错 JSON）。
+    private static func logResponse(url: String, status: Int, data: Data) {
+        let preview = String(data: data.prefix(500), encoding: .utf8)
+            ?? String(decoding: data.prefix(500), as: UTF8.self) // lossy 兜底
+        DiagnosticsLogger.info("← \(status) bytes=\(data.count) \(url)", category: "http",
+                               meta: ["status": "\(status)",
+                                      "bytes": "\(data.count)",
+                                      "body": preview])
     }
 
     /// 解码 envelope 包裹的数据

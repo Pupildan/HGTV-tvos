@@ -30,5 +30,12 @@
 	<!-- tvOS 必需：launch screen（无 storyboard 时用空 dict） -->
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- 局域网日志回传（Bonjour 发现开发机 + TCP 长连接）所需隐私声明 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>需要访问本地网络，以将运行日志回传到同一局域网的开发机，用于诊断数据获取问题。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_hgtvlog._tcp</string>
+	</array>
 </dict>
 </plist>
