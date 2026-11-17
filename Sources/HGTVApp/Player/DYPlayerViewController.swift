@@ -119,10 +119,25 @@ final class DYPlayerViewController: UIViewController {
             self.collectionView.reloadData()
             self.scrollTo(index: startIndex, animated: false)
         }
+        // 取流失败（电影等无流条目）→ 居中时自动跳到最近可播条目（v23 兜底）
+        manager.onAcquireFailed = { [weak self] index in
+            self?.handleAcquireFailed(index: index)
+        }
     }
 
-    /// 播完自动切下一集（v22，A1 决策）：居中条目播完 → advance()；
-    /// 已是最后一条则先补 feed 再切。
+    /// 居中条目取流失败：就近跳到可播条目（双向），避免停留在只有封面的死页。
+    private func handleAcquireFailed(index: Int) {
+        guard index == engine.index else { return }
+        if let next = engine.nearestPlayableIndex(after: index, forwardOnly: false) {
+            DiagnosticsLogger.log("条目无播放地址，自动跳过 → index=\(next)", category: "playback", level: .info)
+            scrollTo(index: next, animated: true)
+        } else {
+            DiagnosticsLogger.warn("无可播条目可跳过，原地停留", category: "playback")
+        }
+    }
+
+    /// 播完自动切下一集（v22 A1；v23 增加跳过无流条目）：居中条目播完 → 向前找最近
+    /// 可播条目；已是最后一条则先补 feed 再切。
     private func installLoopObserver() {
         guard playToEndObserver == nil else { return }
         // 用字面量构造（部分 SDK 解析不到该符号）。
@@ -135,16 +150,15 @@ final class DYPlayerViewController: UIViewController {
                   let ended = note.object as? AVPlayerItem else { return }
             let centered = self.manager.peekPlayer(at: self.engine.index)
             guard centered?.currentItem === ended else { return }
-            let next = self.engine.index + 1
-            if next < self.engine.itemCount {
+            if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
                 DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
-                self.advance()
+                self.scrollTo(index: next, animated: true)
             } else {
-                // 到达末尾：先补一批 feed 再切过去
+                // 向前无可播：补一批 feed 后再试一次
                 Task { [weak self] in
                     await self?.loadMoreAndSync()
-                    if self?.engine.index + 1 ?? 0 < self?.engine.itemCount ?? 0 {
-                        self?.advance()
+                    if let next = self?.engine.nearestPlayableIndex(after: self?.engine.index ?? 0, forwardOnly: true) {
+                        self?.scrollTo(index: next, animated: true)
                     }
                 }
             }

@@ -32,6 +32,8 @@ final class PlayerManager {
     var onPlayerAcquired: ((Int) -> Void)?
     /// 驱逐某索引后回调（控制器据此释放对应本地代理）。
     var onEvicted: ((Int) -> Void)?
+    /// 建池失败回调（取流失败，如电影条目；控制器据此自动跳过，v23 兜底）。
+    var onAcquireFailed: ((Int) -> Void)?
 
     init(resolve: @escaping Resolver, itemCount: @escaping () -> Int, vidAt: @escaping (Int) -> String?) {
         self.resolve = resolve
@@ -127,6 +129,7 @@ final class PlayerManager {
             return player
         } catch {
             DiagnosticsLogger.error("acquire 失败 index=\(index) vid=\(vid): \(error.localizedDescription)", category: "playback")
+            onAcquireFailed?(index)
             return nil
         }
     }

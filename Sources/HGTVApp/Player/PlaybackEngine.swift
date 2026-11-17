@@ -42,12 +42,15 @@ final class PlaybackEngine {
     var onDataReplaced: ((Int) -> Void)?
 
     private var seenVids: Set<String> = []
-    /// feed 内容池轮换：4 个 tab 实测内容**完全不相交**（tab8 找剧 9 条 / tab38 真人剧
-    /// 11 条 / tab32 漫剧 10 条 / tab14 电影 16 条，两两交集全为 0）。bookmall 端点
-    /// 不提供翻页（has_more 恒 false），只靠反复请求同一 tab 会得到高度重复的固定
-    /// 内容池；轮换 tab 才有真正多样的无限流。
-    private let feedTabTypes: [Int] = [8, 38, 32, 14]
+    /// feed 内容池轮换：3 个 tab 实测内容**完全不相交**（tab8 找剧 9 条 / tab38 真人剧
+    /// 11 条 / tab32 漫剧 10 条，两两交集全为 0）。bookmall 端点不提供翻页（has_more
+    /// 恒 false），轮换 tab 才有真正多样的无限流。
+    /// v23 起去掉 tab14（电影）：电影条目 multi_video_model 不下发播放地址（报
+    /// 「播放地址已过期」），非短剧内容，用户拍板移除（顶部栏位后续单列电影入口）。
+    private let feedTabTypes: [Int] = [8, 38, 32]
     private var feedTabCursor = 0
+    /// 已确认拿不到播放地址的 vid（如电影）。resolve 失败时记录，用于自动跳过。
+    private var failedVids: Set<String> = []
 
     // MARK: - 本地代理缓存（vid → 解密后明文的本地 URL）
 
@@ -201,10 +204,42 @@ final class PlaybackEngine {
         let task = Task { [weak self] () -> URL in
             defer { self?.inflightResolves.removeValue(forKey: vid) }
             guard let self else { throw PlaybackResolveError.missingVid }
-            return try await self.doResolve(vid)
+            do {
+                return try await self.doResolve(vid)
+            } catch {
+                // 记入失败名单：自动切集时跳过拿不到流的条目（如电影，v23 兜底）
+                self.failedVids.insert(vid)
+                throw error
+            }
         }
         inflightResolves[vid] = task
         return try await task.value
+    }
+
+    /// 该 vid 是否已确认取流失败。
+    func isFailedVid(_ vid: String?) -> Bool {
+        guard let vid else { return false }
+        return failedVids.contains(vid)
+    }
+
+    /// 从 i 出发向后（forwardOnly）或双向寻找最近的可播 index。
+    /// 用于：播完自动切下一集（只向前）、失败自动跳过（双向就近）。
+    /// 找不到返回 nil（调用方原地停留）。
+    func nearestPlayableIndex(after i: Int, forwardOnly: Bool) -> Int? {
+        let n = items.count
+        guard n > 0 else { return nil }
+        for step in 1..<n {
+            let j = i + step
+            if j >= n { break }
+            if let vid = items[j].videoId, !failedVids.contains(vid) { return j }
+        }
+        if forwardOnly { return nil }
+        for step in 1..<n {
+            let j = i - step
+            if j < 0 { break }
+            if let vid = items[j].videoId, !failedVids.contains(vid) { return j }
+        }
+        return nil
     }
 
     /// 完整解密链路（取流 → 下载 → 派生密钥 → 解密 → 本地代理）。
