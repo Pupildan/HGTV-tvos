@@ -38,6 +38,8 @@ final class PlaybackEngine {
 
     /// 接近末尾时触发（由控制器注册，负责加载更多 + 刷新 collection）。
     var onNeedMore: (() -> Void)?
+    /// 整表替换（选集进入剧集连播）后触发，控制器据此 reload + 跳转到起始集。
+    var onDataReplaced: ((Int) -> Void)?
 
     private var seenVids: Set<String> = []
     /// feed 内容池轮换：4 个 tab 实测内容**完全不相交**（tab8 找剧 9 条 / tab38 真人剧
@@ -131,6 +133,32 @@ final class PlaybackEngine {
         }
         if !added.isEmpty { items.append(contentsOf: added) }
         return added
+    }
+
+    // MARK: - 剧集连播（选集入口，v22）
+
+    /// 用一部剧的全量集数整表替换当前 feed，从 startIndex 集开始播。
+    /// 选集网格点任意一集 → 回到全屏刷集模式，播完自动衔接下一集（A1）。
+    /// 替换完成后触发 onDataReplaced(startIndex)（控制器 reload + 跳转）。
+    func playSeries(seriesId: String, title: String?, coverURL: URL?,
+                    vids: [String], startIndex: Int) {
+        guard !vids.isEmpty else { return }
+        let dramaItems = vids.enumerated().map { (i, vid) in
+            DramaItem(bookId: nil, videoId: vid, seriesId: seriesId,
+                      title: title.map { "第 \(i + 1) 集 · \($0)" } ?? "第 \(i + 1) 集",
+                      thumbURL: coverURL, description: nil,
+                      category: nil, playCount: nil, score: nil)
+        }
+        seenVids = Set(vids)
+        items = dramaItems
+        let target = min(max(0, startIndex), vids.count - 1)
+        index = target
+        firstFrameReady = false
+        hasLoaded = true
+        errorMessage = nil
+        DiagnosticsLogger.log("选集进入剧集 series=\(seriesId) 共 \(vids.count) 集，从第 \(target + 1) 集开始",
+                              category: "playback", level: .info)
+        onDataReplaced?(target)
     }
 
     // MARK: - 居中对齐（唯一真相源）

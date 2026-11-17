@@ -25,6 +25,9 @@ final class DYPlayerViewController: UIViewController {
     private var isLoadingMore = false
     private var playToEndObserver: NSObjectProtocol?
 
+    /// 按确认键（遥控中键）请求进入当前剧的详情页（v22）。由 SwiftUI 侧注册。
+    var onSelectSeries: ((String, String?) -> Void)?
+
     init(engine: PlaybackEngine) {
         self.engine = engine
         super.init(nibName: nil, bundle: nil)
@@ -40,6 +43,7 @@ final class DYPlayerViewController: UIViewController {
         setupCollectionView()
         wireCallbacks()
         installLoopObserver()
+        installSwipeFocusRouting()
 
         Task { [weak self] in
             guard let self else { return }
@@ -109,14 +113,20 @@ final class DYPlayerViewController: UIViewController {
         engine.onNeedMore = { [weak self] in
             self?.loadMoreAndSync()
         }
+        // 选集 → 整表替换为剧集连播（v22）
+        engine.onDataReplaced = { [weak self] startIndex in
+            guard let self else { return }
+            self.collectionView.reloadData()
+            self.scrollTo(index: startIndex, animated: false)
+        }
     }
 
-    /// 循环播放：居中条目播完自动重头。
+    /// 播完自动切下一集（v22，A1 决策）：居中条目播完 → advance()；
+    /// 已是最后一条则先补 feed 再切。
     private func installLoopObserver() {
         guard playToEndObserver == nil else { return }
         // 用字面量构造（部分 SDK 解析不到该符号）。
-        // 注意系统通知 rawValue 是 "AVPlayerItemDidPlayToEndTime"（旧代码少了 "Time"，
-        // 导致循环重播永不触发）。
+        // 注意系统通知 rawValue 是 "AVPlayerItemDidPlayToEndTime"（旧代码少了 "Time"）。
         let name = Notification.Name("AVPlayerItemDidPlayToEndTime")
         playToEndObserver = NotificationCenter.default.addObserver(
             forName: name, object: nil, queue: .main
@@ -125,9 +135,19 @@ final class DYPlayerViewController: UIViewController {
                   let ended = note.object as? AVPlayerItem else { return }
             let centered = self.manager.peekPlayer(at: self.engine.index)
             guard centered?.currentItem === ended else { return }
-            centered?.seek(to: .zero)
-            centered?.play()
-            DiagnosticsLogger.debug("循环重播 index=\(self.engine.index)", category: "playback")
+            let next = self.engine.index + 1
+            if next < self.engine.itemCount {
+                DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
+                self.advance()
+            } else {
+                // 到达末尾：先补一批 feed 再切过去
+                Task { [weak self] in
+                    await self?.loadMoreAndSync()
+                    if self?.engine.index + 1 ?? 0 < self?.engine.itemCount ?? 0 {
+                        self?.advance()
+                    }
+                }
+            }
         }
     }
 
@@ -233,25 +253,103 @@ final class DYPlayerViewController: UIViewController {
     private func advance() { scrollTo(index: engine.index + 1, animated: true) }
     private func rewind() { scrollTo(index: engine.index - 1, animated: true) }
 
-    // MARK: - 遥控（Siri Remote 上下箭头）
+    // MARK: - 遥控（v22：左右切集 + 确认键进详情）
 
+    /// Siri Remote 的按键走 UIPress.type（press.key 只对物理键盘非 nil——
+    /// 旧实现检查 press.key 导致遥控按键全部被跳过，这就是「没有切换入口」的根因之一）。
+    /// 交互（用户指定）：遥控**左右**滑动/点击环左右 = 上一集/下一集；中键确认 = 进入当前剧详情页。
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            guard let key = press.key else { continue }
-            switch key.keyCode {
-            case .keyboardUpArrow:
+            switch press.type {
+            case .leftArrow:
                 rewind()
                 handled = true
-            case .keyboardDownArrow:
+            case .rightArrow:
                 advance()
                 handled = true
+            case .select:
+                // 中键确认：进入当前剧集详情（有 seriesId 才响应）
+                if let drama = engine.currentDrama,
+                   let sid = drama.seriesId, !sid.isEmpty {
+                    onSelectSeries?(sid, engine.currentVid)
+                    handled = true
+                }
             default:
                 break
             }
         }
         if handled { return }
         super.pressesBegan(presses, with: event)
+    }
+
+    /// 触控板滑动走焦点引擎（不产生 UIPress）。用「全屏 UIFocusGuide + 不可见代理视图」
+    /// 拦截滑动方向（唯一拦截点，避免多处响应导致一次滑动翻两页）：
+    /// 左/右 = 上一集/下一集；上/下按需求吞掉不作为切换入口。
+    private var focusProxy: SwipeFocusProxyView?
+    private var swipeFocusGuide: UIFocusGuide?
+
+    /// 把焦点拉进播放器（否则触控板滑动可能作用在 tab 栏上）。
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        if let focusProxy {
+            return [focusProxy] + super.preferredFocusEnvironments
+        }
+        return super.preferredFocusEnvironments
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
+
+    /// 全屏不可见焦点代理：接收滑动方向并翻译成翻页动作。
+    /// 注意 UIFocusHeading 是 OptionSet（可能组合值），用 contains 判断而非 switch。
+    final class SwipeFocusProxyView: UIView {
+        var onDirection: ((UIFocusHeading) -> Void)?
+
+        override var canBecomeFocused: Bool { true }
+
+        override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
+            if context.direction.contains(.left) || context.direction.contains(.right) {
+                onDirection?(context.direction)
+                return false
+            }
+            if context.direction.contains(.up) || context.direction.contains(.down) {
+                return false // 上下按需求不作为切换入口，吞掉保持焦点稳定
+            }
+            return super.shouldUpdateFocus(in: context)
+        }
+    }
+
+    private func installSwipeFocusRouting() {
+        guard swipeFocusGuide == nil else { return }
+        let proxy = SwipeFocusProxyView(frame: view.bounds)
+        proxy.backgroundColor = .clear
+        proxy.alpha = 0.02   // 完全透明(alpha 0)的 view 不能聚焦，给一点可见度
+        proxy.isUserInteractionEnabled = false
+        proxy.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        proxy.onDirection = { [weak self] heading in
+            guard let self else { return }
+            if heading.contains(.left) {
+                self.rewind()
+            } else if heading.contains(.right) {
+                self.advance()
+            }
+        }
+        view.addSubview(proxy)
+        focusProxy = proxy
+
+        let guide = UIFocusGuide()
+        guide.preferredFocusEnvironments = [proxy]
+        view.addLayoutGuide(guide)
+        NSLayoutConstraint.activate([
+            guide.topAnchor.constraint(equalTo: view.topAnchor),
+            guide.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            guide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            guide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        swipeFocusGuide = guide
     }
 
     /// 离开时停播并移除循环观察（避免 deinit 访问 actor 隔离属性）。

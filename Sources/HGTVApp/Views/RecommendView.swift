@@ -23,13 +23,21 @@ struct RecommendView: View {
     @State private var infoVisible = true
     /// 居中加载圈兜底开关（3 秒强制关闭）。
     @State private var spinnerVisible = true
+    /// 按 OK 键进入的剧集详情（nil=不显示）。确认键 → 拉详情 → 选集网格。
+    @State private var detailSeriesId: String?
+    /// 打开详情时的剧信息（选集后回填到连播标题/封面）。
+    @State private var detailDrama: DramaItem?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             // 全屏分页播放器（底层）
-            NativePlayerView(engine: engine)
+            NativePlayerView(engine: engine,
+                             onSelectSeries: { sid in
+                                 detailDrama = engine.currentDrama
+                                 detailSeriesId = sid
+                             })
                 .ignoresSafeArea()
                 .zIndex(0)
 
@@ -40,6 +48,27 @@ struct RecommendView: View {
         }
         .background(Color.black)
         .navigationTitle("推荐")
+        .fullScreenCover(isPresented: Binding(
+            get: { detailSeriesId != nil },
+            set: { if !$0 { detailSeriesId = nil } }
+        )) {
+            if let sid = detailSeriesId {
+                DramaDetailView(
+                    item: detailDrama ?? DramaItem(bookId: nil, videoId: nil, seriesId: sid,
+                                                   title: nil, thumbURL: nil, description: nil,
+                                                   category: nil, playCount: nil, score: nil),
+                    currentVid: engine.currentVid,
+                    onPickInPlayer: { vids, index in
+                        let drama = detailDrama
+                        engine.playSeries(seriesId: sid,
+                                          title: drama?.title,
+                                          coverURL: drama?.thumbURL,
+                                          vids: vids, startIndex: index)
+                        detailSeriesId = nil
+                    }
+                )
+            }
+        }
         .task(id: engine.currentVid) {
             // 换集（含首次出现）：信息条重现 5 秒 → 淡出；转圈 3 秒兜底关闭。
             // task(id:) 在 currentVid 变化时重跑，正好覆盖"每次换集重新计时"。

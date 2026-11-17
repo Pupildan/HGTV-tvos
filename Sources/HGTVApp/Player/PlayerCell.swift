@@ -49,6 +49,9 @@ final class PlayerLayerView: UIView {
 final class PlayerCell: UICollectionViewCell {
     static let reuseID = "PlayerCell"
 
+    // v22：cell 不参与焦点（全屏视频页的滑动方向由 SwipeFocusProxyView 统一接管）
+    override var canBecomeFocused: Bool { false }
+
     let playerLayerView = PlayerLayerView(frame: .zero)
     let coverImageView = UIImageView(frame: .zero)
 
