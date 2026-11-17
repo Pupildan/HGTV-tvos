@@ -93,11 +93,12 @@ public actor TCPTransport: DiagnosticsTransport {
         browser?.cancel()
         let params = NWParameters()
         params.includePeerToPeer = false
-        // 用静态工厂方法构造 service descriptor（Descriptor 无公开构造器）；service 有 3 个关联值
-        let browser = NWBrowser(for: .service(type: serviceType, domain: domain, interface: nil), using: params)
+        // Descriptor 是 enum；Xcode 26 SDK 里浏览 Bonjour 服务的 case 是 .bonjour(type:domain:)
+        // （旧的 .service(type:domain:interface:) 已被移除）。
+        let browser = NWBrowser(for: .bonjour(type: serviceType, domain: domain), using: params)
         self.browser = browser
 
-        browser.stateUpdateHandler = { [weak self] newState in
+        browser.stateUpdateHandler = { [weak self] (newState: NWBrowser.State) in
             // 回调在 queue 上；先转成 Sendable 的 String，再 hop 回 actor，避免跨隔离传非 Sendable。
             guard let self else { return }
             switch newState {
@@ -113,7 +114,7 @@ public actor TCPTransport: DiagnosticsTransport {
                 break
             }
         }
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
+        browser.browseResultsChangedHandler = { [weak self] (results: Set<NWBrowser.Result>, _: Set<NWBrowser.Result.Change>) in
             guard let self else { return }
             // 在 queue 线程上抽取服务名（Sendable 的 [String]），再 hop 回 actor。
             var names: [String] = []
