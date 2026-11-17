@@ -23,6 +23,10 @@ final class PlayerManager {
     private var currentCenter = 0
     /// 冷启动收敛：池全空时只装载居中条，邻居推迟到居中 ready 后补齐。
     private var pendingNeighbors: [Int] = []
+    /// 建池中的 index。acquire 在 resolve 期间会让 players[index] 仍为空，
+    /// 期间再来的 prepare/acquire 会并发建第二个 player 覆盖第一个（孤儿泄漏 +
+    /// 出现 failed/ready 双日志）。同 index 并发请求直接复用现有结果。
+    private var acquiring: Set<Int> = []
 
     /// 成功建起 player 后回调（控制器据此重新 bind 可见 cell 并播放）。
     var onPlayerAcquired: ((Int) -> Void)?
@@ -59,11 +63,11 @@ final class PlayerManager {
             return
         }
 
-        // 3) 补齐窗口内缺失（居中优先）
-        if players[clamped] == nil {
+        // 3) 补齐窗口内缺失（居中优先）。acquiring 防重入：建池中的 index 不重复建。
+        if players[clamped] == nil, !acquiring.contains(clamped) {
             Task { await self.acquire(index: clamped) }
         }
-        for i in lower...upper where i != clamped && players[i] == nil {
+        for i in lower...upper where i != clamped && players[i] == nil && !acquiring.contains(i) {
             Task { await self.acquire(index: i) }
         }
     }
@@ -88,17 +92,22 @@ final class PlayerManager {
 
     // MARK: - 新建 player
 
-    /// 建 player + KVO。已存在直接复用。
+    /// 建 player + KVO。已存在直接复用；同 index 建池中则不重复建。
     func acquire(index: Int) async -> AVPlayer? {
         if let existing = players[index] { return existing }
+        guard !acquiring.contains(index) else { return players[index] }
         let count = itemCount()
         guard index >= 0, index < count else { return nil }
         guard let vid = vidAt(index) else {
             DiagnosticsLogger.warn("acquire 失败：index=\(index) 无 vid", category: "playback")
             return nil
         }
+        acquiring.insert(index)
+        defer { acquiring.remove(index) }
         do {
             let url = try await resolve(vid)
+            // resolve 期间可能已被并发驱逐/重建，回读仍为空才落池
+            guard players[index] == nil else { return players[index] }
             let asset = AVURLAsset(url: url)
             let item = AVPlayerItem(asset: asset)
             item.preferredForwardBufferDuration = 8
@@ -153,6 +162,7 @@ final class PlayerManager {
         }
         players.removeAll()
         pendingNeighbors.removeAll()
+        acquiring.removeAll()
         DiagnosticsLogger.log("PlayerManager shutdown，池已清空", category: "playback", level: .info)
     }
 

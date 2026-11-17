@@ -237,6 +237,7 @@ public enum CENCDecryptor {
     // MARK: - 解密入口
 
     /// 返回解密后的 mp4 data。对每个 trak 的每个样本用其 IV 做 AES-CTR 整样本解密。
+    /// 解密后额外做 AVPlayer 兼容清理（见 sanitizeForAVPlayer）。
     public static func decrypt(data: Data, key: Data) throws -> Data {
         var buf = [UInt8](data)
         guard let moov = findBox(buf, "moov") else { throw CENCError.noMoov }
@@ -257,7 +258,94 @@ public enum CENCDecryptor {
                 }
             }
         }
+        sanitizeForAVPlayer(&buf)
         return Data(buf)
+    }
+
+    // MARK: - AVPlayer 兼容清理（坑 13：解密后 mp4 仍带加密壳 → AVPlayer 拒渲染）
+
+    /// 番茄的 progressive mp4 在 stsd 里用加密样本入口：视频 `encv`、音频 `enca`，
+    /// 配套 `sinf`(frma/schm/schi/tenc)，stbl 里还有 `senc`/`saiz`/`saio`。
+    /// 只解密 mdat 样本、不动这些壳时：
+    ///   - moov 结构可解析 → AVPlayerItem 照样 readyToPlay、timeControl 能到 playing；
+    ///   - 但 AVFoundation 见到 encv/enca 就认定内容受保护、需要解密器 → 视频解码器
+    ///     永不输出一帧，playerLayer.isReadyForDisplay 恒 false → 全黑。
+    ///   - 桌面播放器（VLC/ffplay）对"样本已是明文"宽容，所以 Python 金标准产物能播，
+    ///     这个坑只在 AVPlayer 上暴露。
+    ///
+    /// 清理方式（原 **in-place 4CC 替换**，不移动任何字节，stco/co64 绝对偏移无需修正）：
+    ///   - `encv`/`enca` → `frma` 里的原始编码 4CC（hvc1/avc1/mp4a…）
+    ///   - `sinf`（含 schm/schi/tenc）→ `free`
+    ///   - `senc`/`saiz`/`saio` → `free`
+    static func sanitizeForAVPlayer(_ buf: inout [UInt8]) {
+        guard let moov = findBox(buf, "moov") else { return }
+        let (moovOff, moovSize) = moov
+        let moovHdr = (Int(be32(buf, moovOff)) == 1) ? 16 : 8
+        for b in iterBoxes(buf, moovOff + moovHdr, moovOff + moovSize) where b.type == "trak" {
+            guard let stbl = findIn(buf, b.offset, b.offset + b.size, "stbl") else { continue }
+            let (so, se) = stbl
+            for t in iterBoxes(buf, so, se) {
+                switch t.type {
+                case "stsd":
+                    sanitizeStsd(&buf, t)
+                case "senc", "saiz", "saio":
+                    swapBoxType(&buf, at: t.offset, to: "free")
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    /// 原地把 box type 改成 newType（4 字节，不改变 box 大小/位置）。
+    private static func swapBoxType(_ buf: inout [UInt8], at off: Int, to newType: String) {
+        let bytes = Array(newType.utf8)
+        guard bytes.count == 4, off + 8 <= buf.count else { return }
+        for (i, c) in bytes.enumerated() { buf[off + 4 + i] = c }
+    }
+
+    /// 清理 stsd：加密样本入口 encv/enca → frma 原格式；其内部 sinf → free。
+    /// 子 box 起点按 ISO-BMFF：VisualSampleEntry 固定头 86 字节、AudioSampleEntry 36 字节。
+    private static func sanitizeStsd(_ buf: inout [UInt8], _ stsd: Box) {
+        let bodyStart = stsd.offset + stsd.headerSize
+        let bodyEnd = stsd.offset + stsd.size
+        // stsd body：[ver/flags 4][entry_count 4][entries...]
+        guard bodyStart + 8 <= bodyEnd else { return }
+        var pos = bodyStart + 8
+        while pos + 8 <= bodyEnd {
+            let entrySize = Int(be32(buf, pos))
+            guard entrySize >= 8, pos + entrySize <= bodyEnd else { return }
+            let type4 = String(decoding: buf[(pos + 4)..<(pos + 8)], as: Unicode.ASCII.self)
+            if type4 == "encv" || type4 == "enca" {
+                let childStart = (type4 == "encv") ? pos + 86 : pos + 36
+                let childEnd = pos + entrySize
+                var originalFormat: [UInt8]?
+                if childStart <= childEnd {
+                    for child in iterBoxes(buf, childStart, childEnd) {
+                        if child.type == "frma" {
+                            let fr = child.offset + child.headerSize
+                            guard fr + 4 <= buf.count else { continue }
+                            originalFormat = Array(buf[fr..<(fr + 4)])
+                        } else if child.type == "sinf" {
+                            swapBoxType(&buf, at: child.offset, to: "free")
+                            // frma 是 sinf 的第一个子 box（original format = 真实编码 4CC）
+                            let sinfBody = child.offset + child.headerSize
+                            let sinfEnd = child.offset + child.size
+                            for sub in iterBoxes(buf, sinfBody, sinfEnd) where sub.type == "frma" {
+                                let fr = sub.offset + sub.headerSize
+                                guard fr + 4 <= buf.count else { continue }
+                                originalFormat = Array(buf[fr..<(fr + 4)])
+                            }
+                        }
+                    }
+                }
+                // encv/enca → 原始编码（hvc1/avc1/mp4a…）；找不到 frma 就保持原样
+                if let fmt = originalFormat {
+                    for (i, c) in fmt.enumerated() { buf[pos + 4 + i] = c }
+                }
+            }
+            pos += entrySize
+        }
     }
 
     // MARK: - AES-128-CTR（纯 Swift 手写 AES-128-ECB 生成 keystream）

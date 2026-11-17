@@ -114,8 +114,10 @@ final class DYPlayerViewController: UIViewController {
     /// 循环播放：居中条目播完自动重头。
     private func installLoopObserver() {
         guard playToEndObserver == nil else { return }
-        // 用字面量构造（部分 SDK 解析不到该符号）
-        let name = Notification.Name("AVPlayerItemDidPlayToEnd")
+        // 用字面量构造（部分 SDK 解析不到该符号）。
+        // 注意系统通知 rawValue 是 "AVPlayerItemDidPlayToEndTime"（旧代码少了 "Time"，
+        // 导致循环重播永不触发）。
+        let name = Notification.Name("AVPlayerItemDidPlayToEndTime")
         playToEndObserver = NotificationCenter.default.addObserver(
             forName: name, object: nil, queue: .main
         ) { [weak self] note in

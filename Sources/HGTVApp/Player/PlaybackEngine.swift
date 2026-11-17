@@ -49,6 +49,10 @@ final class PlaybackEngine {
     private var proxyOrder: [String] = []
     /// 同时驻留的解密明文代理上限（防内存无限增长）。
     private let proxyLimit = 6
+    /// 进行中的 resolve 任务（vid → task）。冷启动/快速滑动时 prepare 可能对同一 vid
+    /// 并发触发两次 acquire → 曾导致重复下载解密 15MB、泄漏孤儿播放器和代理（真机
+    /// 日志：同一 vid 建出 55806/55807 两个端口）。这里收敛为同 vid 共享一个任务。
+    private var inflightResolves: [String: Task<URL, Error>] = [:]
 
     init() {
         DiagnosticsLogger.log("PlaybackEngine 初始化", category: "playback", level: .info)
@@ -149,11 +153,27 @@ final class PlaybackEngine {
     // MARK: - resolve 本地播放 URL（供 PlayerManager.acquire）
 
     /// vid → 本地代理 URL。命中缓存秒回；否则走完整解密链路。
+    /// 同 vid 并发调用共享同一个进行中任务（防重复下载/解密/建代理）。
     func resolveLocalURL(for vid: String) async throws -> URL {
         if let url = urlCache[vid], proxyCache[vid] != nil {
             DiagnosticsLogger.log("命中本地代理缓存 vid=\(vid)", category: "playback", level: .debug)
             return url
         }
+        if let existing = inflightResolves[vid] {
+            DiagnosticsLogger.log("复用进行中的 resolve vid=\(vid)", category: "playback", level: .debug)
+            return try await existing.value
+        }
+        let task = Task { [weak self] () -> URL in
+            defer { self?.inflightResolves.removeValue(forKey: vid) }
+            guard let self else { throw PlaybackResolveError.missingVid }
+            return try await self.doResolve(vid)
+        }
+        inflightResolves[vid] = task
+        return try await task.value
+    }
+
+    /// 完整解密链路（取流 → 下载 → 派生密钥 → 解密 → 本地代理）。
+    private func doResolve(_ vid: String) async throws -> URL {
         DiagnosticsLogger.log("resolve 开始 vid=\(vid)", category: "playback", level: .info)
         // 1) 取加密直链 + spade_a
         let stream = try await APIService.shared.fetchPlayback(vid: vid)
