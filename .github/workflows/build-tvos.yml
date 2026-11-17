@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-latest   # macOS 26 arm64，带最新 Xcode
     timeout-minutes: 40
     permissions:
-      contents: read
+      contents: write   # 构建成功后要 bump VERSION 并 push
 
     steps:
       - name: Checkout
@@ -44,10 +44,14 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Read version
+        id: ver
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Build + package unsigned ipa
         env:
-          # 版本号：GitHub 每次构建自动 +1 的自然数，作为 v{N} 注入 ipa 名与 App CFBundleVersion
-          HGTV_VERSION: ${{ github.run_number }}
+          # 版本号：来自仓库 VERSION 文件（自然数 v1/v2/v3…），构建成功后自动 +1 写回
+          HGTV_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           chmod +x Scripts/build_ipa.sh Scripts/stamp_version.sh
           set -o pipefail
@@ -68,7 +72,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # ipa 命名规范：HGTV-tvOS-v{N}-unsigned.ipa（stamp_version.sh 产出），artifact 名同步带版本
-          name: HGTV-tvOS-v${{ github.run_number }}-unsigned
+          name: HGTV-tvOS-v${{ steps.ver.outputs.version }}-unsigned
           path: dist/HGTV-tvOS-v*-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
+
+      - name: Bump version for next build
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          NEXT=$(( $(cat VERSION) + 1 ))
+          echo "$NEXT" > VERSION
+          git add VERSION
+          git commit -m "chore: bump version to v${NEXT} [skip ci]"
+          git push
