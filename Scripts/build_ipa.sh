@@ -26,7 +26,12 @@ xcrun --sdk appletvos --show-sdk-path
 echo "==> resolving package dependencies (local SwiftPM package referenced by project)"
 swift package resolve
 
-echo "==> schemes in HGTV.xcodeproj"
+echo "==> generating Xcode project via xcodegen"
+# 用 xcodegen 从 project.yml 生成 HGTV.xcodeproj（保证 pbxproj 格式正确）
+if ! command -v xcodegen >/dev/null 2>&1; then
+  brew install xcodegen
+fi
+xcodegen generate
 xcodebuild -project HGTV.xcodeproj -list 2>/dev/null || true
 
 echo "==> xcodebuild archive (project HGTV.xcodeproj, ${CONFIG}, tvOS device arm64)"

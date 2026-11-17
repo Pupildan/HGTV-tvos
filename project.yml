@@ -1,0 +1,45 @@
+# project.yml — xcodegen 声明式生成 tvOS app 工程
+# CI 里用 `xcodegen generate` 产出 HGTV.xcodeproj，再 xcodebuild archive。
+# app target 链接本地 SwiftPM 包的 HGTV 库 product（含 @main 入口）。
+name: HGTV
+options:
+  bundleIdPrefix: com.hgtv
+  deploymentTarget:
+    tvOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SDKROOT: appletvos
+    TARGETED_DEVICE_FAMILY: "3"
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.3.7.3"
+    CURRENT_PROJECT_VERSION: "78"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGN_IDENTITY: ""
+packages:
+  HGTV:
+    path: .
+targets:
+  HGTV:
+    type: application
+    platform: tvOS
+    sources:
+      # app target 不直接含源码，源码在 SwiftPM 包里；这里只挂 Info.plist
+      - path: tvOS
+    info:
+      path: tvOS/Info.plist
+      properties:
+        CFBundleDisplayName: HGTV
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UILaunchScreen: {}
+    dependencies:
+      - package: HGTV
+        product: HGTV
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvos
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: tvOS/Info.plist
+        PRODUCT_NAME: HGTV
