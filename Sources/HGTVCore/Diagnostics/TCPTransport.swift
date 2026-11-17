@@ -93,7 +93,9 @@ public actor TCPTransport: DiagnosticsTransport {
         browser?.cancel()
         let params = NWParameters()
         params.includePeerToPeer = false
-        let browser = NWBrowser(for: .service(type: serviceType, domain: domain), using: params)
+        // 显式构造 descriptor，避免 .service 枚举闭包的类型推断问题
+        let descriptor = NWBrowser.Descriptor(service: serviceType, domain: domain, interface: nil)
+        let browser = NWBrowser(for: descriptor, using: params)
         self.browser = browser
 
         browser.stateUpdateHandler = { [weak self] newState in
