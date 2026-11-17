@@ -110,6 +110,8 @@ public actor TCPTransport: DiagnosticsTransport {
                 Task { await self.browserWasCancelled() }
             case .waiting(let error):
                 Task { await self.browserIsWaiting(description: "\(error)") }
+            case .setup:
+                break
             @unknown default:
                 break
             }

@@ -36,11 +36,13 @@ public final class DiagnosticsLogger: @unchecked Sendable {
     /// 环形缓冲容量（最近 N 条）。
     public static let bufferCapacity = 500
     private static let subsystem = "com.hgtv.star.tvos"
-    private static let isoFormatter: ISO8601DateFormatter = {
+    /// 每次生成新 formatter（ISO8601DateFormatter 非 Sendable，避免共享可变静态状态触发
+    /// Swift 6 严格并发检查）。ISO8601 带毫秒。
+    private static var timestampString: String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+        return f.string(from: Date())
+    }
 
     // MARK: - 可变状态（lock 保护）
 
@@ -171,7 +173,7 @@ public final class DiagnosticsLogger: @unchecked Sendable {
 
     private static func encodeLine(message: String, category: String, level: Level,
                                    meta: [String: String]?) -> String {
-        let ts = isoFormatter.string(from: Date())
+        let ts = timestampString
         // 手工拼单行 JSON：字符串统一 JSON 转义，键排序稳定，meta 为嵌套对象。
         var fields: [(String, String)] = [
             ("ts", quote(ts)),
