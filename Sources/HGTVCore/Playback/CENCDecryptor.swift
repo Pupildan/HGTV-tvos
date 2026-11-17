@@ -271,7 +271,8 @@ public enum CENCDecryptor {
         var status = counter.withUnsafeBytes { cBuf -> CCCryptorStatus in
             key.withUnsafeBytes { kBuf -> CCCryptorStatus in
                 CCCryptorCreateWithMode(
-                    kCCDecryptMode, kCCModeCTR, kCCAlgorithmAES, ccNoPadding,
+                    CCOperation(kCCDecryptMode), CCMode(kCCModeCTR),
+                    CCAlgorithm(kCCAlgorithmAES), CCPadding(ccNoPadding),
                     cBuf.baseAddress!, kBuf.baseAddress!, key.count,
                     nil, 0, 0, &cryptor)
             }
