@@ -311,8 +311,8 @@ public final class APIService: Sendable {
             return n
         }
         // 不支持 Range：看 Content-Length（一次性返回全量也可用）
-        if http.statusCode == 200, let len = http.expectedContentLength, len > 0 {
-            return Int(len)
+        if http.statusCode == 200, http.expectedContentLength > 0 {
+            return Int(http.expectedContentLength)
         }
         return nil
     }
