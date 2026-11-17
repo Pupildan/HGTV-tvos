@@ -187,6 +187,13 @@ final class PlayerManager {
             DiagnosticsLogger.log("item ready index=\(index) vid=\(vid)", category: "playback", level: .info)
             if index == currentCenter {
                 drainPendingNeighbors()
+                // 关键：fast scroll 时 center 切过来时 item 往往还没 ready（走了 pause 分支），
+                // 等 item 真正 readyToPlay 时已没人再触发 play → 停在 paused 黑屏。
+                // 这里补一次 play：当前居中条 ready 即播，确保出画面。
+                if let p = players[index] {
+                    p.play()
+                    DiagnosticsLogger.log("居中条 ready 补 play index=\(index) vid=\(vid)", category: "playback", level: .info)
+                }
             }
         case .failed:
             let err = players[index]?.currentItem?.error?.localizedDescription ?? "unknown"
