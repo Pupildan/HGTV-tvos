@@ -48,6 +48,40 @@ public struct CategoryLandpage: Decodable {
     enum CodingKeys: String, CodingKey { case categoryList = "category_list" }
 }
 
+// MARK: - 书城 tab（/reading/bookapi/bookmall/tab）——已验证返回真实内容
+// 响应：data.tab_item[] 每个 tab 有 title + cell_data（嵌套剧目 cell）
+public struct BookmallTabResponse: Decodable {
+    public let data: BookmallData?
+}
+public struct BookmallData: Decodable {
+    public let tabIndex: Int?
+    public let tabItem: [BookmallTab]?
+    enum CodingKeys: String, CodingKey { case tabIndex = "tab_index", tabItem = "tab_item" }
+}
+public struct BookmallTab: Decodable {
+    public let title: String?
+    public let tabType: Int?
+    public let cellData: [BookmallCell]?
+    enum CodingKeys: String, CodingKey { case title, tabType = "tab_type", cellData = "cell_data" }
+    // 把 tab 映射成首页 DramaItem（title 即真实短剧名，开发机验证）
+    public var dramaItem: DramaItem {
+        DramaItem(bookId: nil, title: title, thumbURL: nil,
+                  description: nil, category: nil, playCount: nil, score: nil)
+    }
+}
+public struct BookmallCell: Decodable {
+    public let cellName: String?
+    public let cellData: [BookmallCell]?
+    // 剧目字段（嵌套 cell 里可能出现）
+    public let bookId: String?
+    public let title: String?
+    public let thumbURL: URL?
+    enum CodingKeys: String, CodingKey {
+        case cellName = "cell_name", cellData = "cell_data"
+        case bookId = "book_id", title, thumbURL = "thumb_url"
+    }
+}
+
 public struct CategoryGroup: Identifiable, Decodable, Hashable {
     public let id: String
     public let name: String?

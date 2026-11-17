@@ -318,3 +318,74 @@ enum MedusaSerializer {
         return [] // TODO(待确认)
     }
 }
+
+// MARK: - SM3（国密哈希，32 字节输出）—— 用于 x-medusa 的 32 字节哈希
+// 标准实现，已用 "abc" 测试向量校准（66c7f0f4...）。
+
+func sm3Hash(_ message: [UInt8]) -> [UInt8] {
+    let IV: [UInt32] = [0x7380166F, 0x4914B2B9, 0x172442D7, 0xDA8A0600,
+                        0xA96F30BC, 0x163138AA, 0xE38DEE4D, 0xB0FB0E4E]
+    func rotl(_ x: UInt32, _ n: Int) -> UInt32 {
+        let k = n % 32
+        return (x << k) | (x >> (32 - k))
+    }
+    func p0(_ x: UInt32) -> UInt32 { return x ^ rotl(x, 9) ^ rotl(x, 17) }
+    func p1(_ x: UInt32) -> UInt32 { return x ^ rotl(x, 15) ^ rotl(x, 23) }
+    func pad(_ msg: [UInt8]) -> [UInt8] {
+        var m = msg
+        let bitLen = UInt64(msg.count) * 8
+        m.append(0x80)
+        while m.count % 64 != 56 { m.append(0) }
+        for shift in stride(from: 56, through: 0, by: -8) {
+            m.append(UInt8((bitLen >> UInt64(shift)) & 0xFF))
+        }
+        return m
+    }
+    let Tj: [UInt32] = Array(repeating: 0x79CC4519, count: 16) + Array(repeating: 0x7A879D8A, count: 48)
+    let m = pad(message)
+    var V = IV
+    for blockStart in stride(from: 0, to: m.count, by: 64) {
+        var W = [UInt32](repeating: 0, count: 68)
+        for i in 0..<16 {
+            let o = blockStart + i * 4
+            W[i] = (UInt32(m[o]) << 24) | (UInt32(m[o+1]) << 16)
+                 | (UInt32(m[o+2]) << 8) | UInt32(m[o+3])
+        }
+        for i in 16..<68 {
+            let x = p1(W[i-16] ^ W[i-9] ^ rotl(W[i-3], 15))
+            W[i] = x ^ rotl(W[i-13], 7) ^ W[i-6]
+        }
+        var A = V[0], B = V[1], C = V[2], D = V[3]
+        var E = V[4], F = V[5], G = V[6], H = V[7]
+        for j in 0..<64 {
+            let SS1 = rotl((rotl(A, 12) &+ E &+ rotl(Tj[j], j % 32)), 7)
+            let SS2 = SS1 ^ rotl(A, 12)
+            let FF: UInt32
+            if j < 16 { FF = A ^ B ^ C }
+            else { FF = (A & B) | (A & C) | (B & C) }
+            let GG: UInt32
+            if j < 16 { GG = E ^ F ^ G }
+            else { GG = (E & F) | (~E & G) }
+            let tt1 = (FF &+ D &+ SS2 &+ W[j]) & 0xFFFFFFFF
+            let tt2 = (GG &+ H &+ SS1 &+ W[j]) & 0xFFFFFFFF
+            D = C
+            C = rotl(B, 9)
+            B = A
+            A = tt1
+            H = G
+            G = rotl(F, 19)
+            F = E
+            E = p0(tt2)
+        }
+        let final = [A, B, C, D, E, F, G, H]
+        for i in 0..<8 { V[i] ^= final[i] }
+    }
+    var out = [UInt8]()
+    for v in V {
+        out.append(UInt8((v >> 24) & 0xFF))
+        out.append(UInt8((v >> 16) & 0xFF))
+        out.append(UInt8((v >> 8) & 0xFF))
+        out.append(UInt8(v & 0xFF))
+    }
+    return out
+}

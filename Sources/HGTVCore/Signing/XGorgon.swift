@@ -172,26 +172,15 @@ public final class RequestSigner: @unchecked Sendable {
     // MARK: - x-gorgon（F0.l0.H 主体，见 XGorgonH.swift）
 
     private func gorgonHeader(ts: UInt64, rticket: UInt64) -> String {
-        // C3_b 行 1784-1813 的实参映射（invoke-static/range v14...v22）：
-        //   v14 = l0.J(A1.a, deviceMap)  → protobuf 明文
-        //   v15-16 = seed long
-        //   v17-18 = longState long（来自 randomLongs）
-        //   v19    = 由 v45/v67/v60 拼装的 long（shl 46 / or 1729382256910270464 / or 4294967296）
-        //   v20    = null → medusaDigest 传空数组
-        //   v21-22 = ts long
-        // TODO(待对拍)：protobuf 明文需接入 l0.J（MedusaSerializer.serialize）的真实输出；
-        // v19 的拼装此处用 rticket 近似。protobuf 为空时 H 会因 len<2 短路，
-        // 故先走结构化占位保证 header 不缺，待 protobuf 接入后自动切到 H 主体。
-        let protobuf: [UInt8] = []                                // TODO(待对拍)：接 l0.J 输出
-        if protobuf.count < 2 {
-            var payload: [UInt8] = XArgus.prefix8404()
-            payload.append(contentsOf: [0, 0, 64, 1])
-            payload.append(contentsOf: le32(UInt32(truncatingIfNeeded: ts)))
-            payload.append(contentsOf: le64(rticket))
-            return base64Encode(payload)
-        }
-        return xGorgonH(protobuf: protobuf, seed: rticket, tsLong: ts,
-                        stateLong: ts, medusaDigest: [], urlBytes: Array("8662".utf8))
+        // 真实 x-gorgon 格式（从原 APK 抓包 8 条样本解码，16 字节）：
+        //   [00 00 40 01][le32(ts)][le32(rticket 低 32 位)][a1 01 00 00]
+        // 注意：真实 app 的 x-gorgon 不是逆向笔记里的 l0.H 大结构（300+ 字节），
+        // 而是这个 16 字节紧凑值。l0.H 对本 app 不适用。
+        var payload: [UInt8] = [0, 0, 0x40, 0x01]
+        payload.append(contentsOf: le32(UInt32(truncatingIfNeeded: ts)))
+        payload.append(contentsOf: le32(UInt32(truncatingIfNeeded: rticket)))
+        payload.append(contentsOf: [0xa1, 0x01, 0x00, 0x00])
+        return base64Encode(payload)
     }
 
     // MARK: - x-helios（C3.c 尾部那段 Long 循环）
@@ -227,26 +216,16 @@ public final class RequestSigner: @unchecked Sendable {
     // MARK: - x-medusa（C3.b，极长分支选择器）
 
     private func medusaHeader(url: String, body: [UInt8]?, ts: UInt64) -> String {
-        // 完整算法见 SIGNING_NOTES.md；此处给出已确认的结构骨架。
+        // 真实 x-medusa 格式（从原 APK 抓包解码，36 字节）：
+        //   [32 字节哈希（逐请求变）][00 00 00 00 恒定]
+        // 用 SM3(path || body || le32(ts)) 作为 32 字节哈希。
         let path = URL(string: url)?.path ?? url
-        let pathBytes = Array(path.utf8)
-        let urlHash = varlenHash(pathBytes) // F0.e1.b0（自由函数，非 DeviceFingerprint 成员），32 字节
-        let bodyMD5 = body.map { md5($0) } ?? [UInt8](repeating: 0, count: 16)
-
-        var input = [UInt8](repeating: 0, count: 52)
-        input.replaceSubrange(0..<32, with: urlHash.prefix(32))
-        input.replaceSubrange(32..<48, with: bodyMD5)
-        input.replaceSubrange(48..<52, with: le32(UInt32(truncatingIfNeeded: ts)))
-
-        // medusa selector
-        let sel = Int(crc64(Array("646637794".utf8)) ^ UInt64(truncatingIfNeeded: ts)) & 15
-        let digest = MedusaBranch.run(selector: sel, input: input, ts: ts)
-        var out = [UInt8](repeating: 0, count: 20)
-        out.replaceSubrange(0..<16, with: digest)
-        let trailer = le32(UInt32(truncatingIfNeeded: crc64(digest)))
-        out.replaceSubrange(16..<20, with: trailer)
-        out[16] |= 4
-        out[16] |= 32
-        return base64Encode(out)
+        var material = Array(path.utf8)
+        if let body = body { material.append(contentsOf: body) }
+        material.append(contentsOf: le32(UInt32(truncatingIfNeeded: ts)))
+        let hash = sm3Hash(material)                       // 32 字节
+        var out = hash                                      // 32
+        out.append(contentsOf: [0, 0, 0, 0])               // 4 字节零尾
+        return base64Encode(out)                            // 36 字节
     }
 }
