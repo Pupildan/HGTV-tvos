@@ -128,11 +128,33 @@ public final class PlaybackProxy: @unchecked Sendable {
             headers["Content-Range"] = "bytes \(start)-\(end)/\(total)"
             let slice = payload.subdata(in: payload.startIndex + start ..< payload.startIndex + end + 1)
             body = slice
+            logRequest(requestHeaders: requestHeaders, status: "206 Partial Content",
+                       contentRange: headers["Content-Range"], total: total)
             send(connection: connection, status: "206 Partial Content", headers: headers, body: body)
         } else {
             body = payload
+            logRequest(requestHeaders: requestHeaders, status: "200 OK",
+                       contentRange: nil, total: total)
             send(connection: connection, status: "200 OK", headers: headers, body: body)
         }
+    }
+
+    /// 诊断日志：记录每次收到的请求（方法、路径、Range 头、返回状态、Content-Range）。
+    /// 仅记日志，不改任何代理核心逻辑。
+    private func logRequest(requestHeaders: String, status: String,
+                            contentRange: String?, total: Int) {
+        let firstLine = requestHeaders.split(separator: "\r\n").first.map(String.init) ?? "?"
+        var rangeHeader: String = "(none)"
+        for rawLine in requestHeaders.split(separator: "\r\n") {
+            if rawLine.lowercased().hasPrefix("range:") {
+                rangeHeader = String(rawLine)
+                break
+            }
+        }
+        var msg = "proxy \(status) \(firstLine) Range=\(rangeHeader)"
+        if let cr = contentRange { msg += " Content-Range=\(cr)" }
+        msg += " total=\(total)"
+        DiagnosticsLogger.log(msg, category: "playback", level: .debug)
     }
 
     private func send(connection: NWConnection, status: String,
