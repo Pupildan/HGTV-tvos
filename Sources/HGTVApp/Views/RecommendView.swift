@@ -324,27 +324,21 @@ struct RecommendView: View {
     }
 }
 
-/// tvOS 上 SwiftUI 的 VideoPlayer 常不渲染视频输出，改用 AVPlayerLayer 的
-/// UIViewRepresentable，直接把 AVPlayer 挂到 layer 上，保证画面出来。
-struct PlayerLayerView: UIViewRepresentable {
+/// tvOS 上 SwiftUI 的 VideoPlayer 常不渲染视频输出；手动挂 AVPlayerLayer 又容易尺寸
+/// 不对（画面残缺/压成一小条）。改用 AVPlayerViewController（AVKit）托管 AVPlayer，
+/// 它在 tvOS 上正确处理视频渲染与宽高比，默认铺满容器。
+struct PlayerLayerView: UIViewControllerRepresentable {
     let player: AVPlayer
 
-    final class PlayerContainerView: UIView {
-        override static var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = player
+        vc.showsPlaybackControls = false   // feed 内嵌播放，不要系统控制条
+        vc.videoGravity = .resizeAspect
+        return vc
     }
 
-    func makeUIView(context: Context) -> PlayerContainerView {
-        let view = PlayerContainerView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
-        view.backgroundColor = .black
-        return view
-    }
-
-    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
-        if uiView.playerLayer.player !== player {
-            uiView.playerLayer.player = player
-        }
+    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
+        if vc.player !== player { vc.player = player }
     }
 }
