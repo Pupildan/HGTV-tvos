@@ -11,6 +11,9 @@ struct PlayerView: View {
     @State private var playerModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
 
+    /// 播放用 vid（multi_video_model 需要 vid；DramaItem.id 优先 videoId）
+    private var playVid: String { item.videoId ?? item.id }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -28,7 +31,7 @@ struct PlayerView: View {
                     Text(err).font(.caption).foregroundStyle(.secondary)
                     HStack(spacing: 20) {
                         Button("换备用地址重试") {
-                            Task { await playerModel.retryWithNextHost(itemId: item.id) }
+                            Task { await playerModel.retryWithNextHost(vid: playVid) }
                         }
                         Button("返回") { dismiss() }
                     }
@@ -40,7 +43,7 @@ struct PlayerView: View {
         }
         .navigationTitle(item.title ?? "")
         .onAppear {
-            Task { await playerModel.play(itemId: item.id) }
+            Task { await playerModel.play(vid: playVid) }
         }
         .onDisappear {
             playerModel.stop()

@@ -121,6 +121,139 @@ public final class APIService: Sendable {
         return model
     }
 
+    // MARK: - 播放链路（multi_video_model，忠实移植 gorgon_py/playback_client.py）
+
+    /// 一档清晰度的播放流（CENC 加密）：main_url + spade_a 派生密钥 + 可选 kid。
+    public struct PlaybackStream {
+        public let url: URL
+        public let spadeA: String
+        public let kid: String?
+        public init(url: URL, spadeA: String, kid: String?) {
+            self.url = url
+            self.spadeA = spadeA
+            self.kid = kid
+        }
+    }
+
+    /// vid → 已打通的播放地址 + spade_a。
+    /// 端点：POST /novel/player/multi_video_model/v1/?...&vid=<vid>
+    /// body（gzip JSON）：{"biz_param":{...},"dr_scene":"player","mixed_video_id_map":{"1004":[vid]}}
+    /// 响应：data.<vid>.video_model（内嵌 JSON 字符串）→ video_list[].main_url / encrypt_info.spade_a
+    public func fetchPlayback(vid: String) async throws -> PlaybackStream {
+        // 内层 biz_param（s0 方法精确字段）
+        let bizParam: [String: Any] = [
+            "detail_page_version": 0,
+            "device_level": 5,
+            "disable_digg_stat": false,
+            "disable_video_relate_book": false,
+            "need_all_video_definition": true,
+            "need_mp4_align": false,
+            "use_os_player": false,
+            "use_server_dns": true,
+            "use_server_dns_scene": "cold_start_stage",
+            "video_platform": 1024,
+        ]
+        let payload: [String: Any] = [
+            "biz_param": bizParam,
+            "dr_scene": "player",
+            "mixed_video_id_map": ["1004": [vid]],
+        ]
+        let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let gzipped = Gzip.compress(jsonData)
+
+        let target = HTTPTargetImpl(
+            host: HGTVConfig.Host.fqnovel,
+            path: HGTVConfig.Path.multiVideoModel,
+            method: "POST",
+            query: ["vid": vid],
+            body: gzipped,
+            signed: true,
+            // Content-Type 已由 signer 注入，这里补 gzip 编码头
+            extraHeaders: ["Content-Encoding": "gzip"]
+        )
+        let raw = try await http.request(target)
+        guard let stream = try Self.parsePlayback(from: raw, vid: vid) else {
+            throw HTTPError.streamExpired
+        }
+        return stream
+    }
+
+    /// 解析 multi_video_model 响应，取首个带 main_url + spade_a 的清晰度。
+    static func parsePlayback(from data: Data, vid: String) throws -> PlaybackStream? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw HTTPError.invalidResponse
+        }
+        let code = obj["code"] as? Int
+        if let code, code != 0 {
+            throw HTTPError.catalogHTTP(code)
+        }
+        guard let dataDict = obj["data"] as? [String: Any] else { return nil }
+        // data.<vid> 可能是字典；兼容 vid 缺失时取第一个
+        var model: [String: Any]?
+        if let m = dataDict[vid] as? [String: Any] {
+            model = m
+        } else if let first = dataDict.values.first as? [String: Any] {
+            model = first
+        }
+        guard let model else { return nil }
+
+        let vmRaw = model["video_model"]
+        let vm: [String: Any]
+        if let s = vmRaw as? String {
+            guard let parsed = (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any]
+            else { return nil }
+            vm = parsed
+        } else if let d = vmRaw as? [String: Any] {
+            vm = d
+        } else {
+            return nil
+        }
+        guard let videoList = vm["video_list"] as? [[String: Any]] else { return nil }
+
+        // 优先选带 spade_a 的加密流；其次退回任意 main_url
+        var fallback: PlaybackStream?
+        for item in videoList {
+            guard let urlStr = item["main_url"] as? String, let url = URL(string: urlStr) else {
+                continue
+            }
+            let encrypt = item["encrypt_info"] as? [String: Any] ?? [:]
+            let spade = encrypt["spade_a"] as? String ?? ""
+            let kid = encrypt["kid"] as? String
+            if !spade.isEmpty {
+                return PlaybackStream(url: url, spadeA: spade, kid: kid)
+            }
+            if fallback == nil {
+                fallback = PlaybackStream(url: url, spadeA: "", kid: kid)
+            }
+        }
+        return fallback
+    }
+
+    /// 下载加密 mp4（CDN 直链，无需签名，跟随重定向）。
+    public func downloadData(from url: URL) async throws -> Data {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue(HGTVConfig.userAgent(), forHTTPHeaderField: HGTVConfig.HeaderKey.userAgent)
+        let (data, resp): (Data, URLResponse)
+        do {
+            (data, resp) = try await Self.downloadSession.data(for: req)
+        } catch {
+            throw HTTPError.network(error)
+        }
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw HTTPError.catalogHTTP((resp as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        return data
+    }
+
+    /// 下载专用会话（独立于签名 HTTPClient，CDN 直链用）
+    private static let downloadSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 300
+        return URLSession(configuration: cfg)
+    }()
+
     // MARK: - 登录态
     public func isLoggedIn() async -> Bool {
         await DeviceRegisterService.shared.hasSession()

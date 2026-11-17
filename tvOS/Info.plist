@@ -37,5 +37,11 @@
 	<array>
 		<string>_hgtvlog._tcp</string>
 	</array>
+	<!-- 本地播放代理：AVPlayer 走 http://127.0.0.1 明文，需放行本地网络 ATS -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

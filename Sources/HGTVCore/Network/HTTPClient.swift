@@ -17,6 +17,13 @@ public protocol HTTPTarget {
     var body: Data? { get }
     /// 是否走签名链路（passport / novel / reading 需要；自建搜索中转不需要）
     var signed: Bool { get }
+    /// 调用方额外补充头（如 Content-Encoding: gzip）；经 SignInterceptor 注入
+    var extraHeaders: [String: String] { get }
+}
+
+extension HTTPTarget {
+    /// 默认无额外头（已有 HTTPTargetImpl 存储属性满足此要求）
+    public var extraHeaders: [String: String] { [:] }
 }
 
 public struct HTTPTargetImpl: HTTPTarget {
@@ -26,19 +33,22 @@ public struct HTTPTargetImpl: HTTPTarget {
     public let query: [String: String]
     public let body: Data?
     public let signed: Bool
+    public let extraHeaders: [String: String]
 
     public init(host: String,
                 path: String,
                 method: String = "GET",
                 query: [String: String] = [:],
                 body: Data? = nil,
-                signed: Bool = true) {
+                signed: Bool = true,
+                extraHeaders: [String: String] = [:]) {
         self.host = host
         self.path = path
         self.method = method
         self.query = query
         self.body = body
         self.signed = signed
+        self.extraHeaders = extraHeaders
     }
 }
 
@@ -99,7 +109,8 @@ public final class HTTPClient: Sendable {
             signedReq = interceptor.intercept(
                 baseURL: url.absoluteString,
                 params: target.query,
-                body: target.body.map { [UInt8]($0) }
+                body: target.body.map { [UInt8]($0) },
+                extraHeaders: target.extraHeaders
             )
         } else {
             // 自建搜索中转：不签名，只拼 query，补 UA
