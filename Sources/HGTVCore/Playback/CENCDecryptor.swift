@@ -320,6 +320,6 @@ public enum CENCDecryptor {
 
     @inline(__always) static func latin1(_ b: [UInt8], _ o: Int, _ n: Int) -> String {
         let slice = b[o..<(o + n)]
-        return String(decoding: slice, as: Unicode.Latin1.self)
+        return String(decoding: slice, as: Unicode.ASCII.self)
     }
 }

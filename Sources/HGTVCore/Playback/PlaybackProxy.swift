@@ -32,9 +32,9 @@ public final class PlaybackProxy: @unchecked Sendable {
     public func start() async throws -> URL {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
-        let ls = try NWListener(using: params)
         // 绑定到 loopback，仅本机 AVPlayer 可访问
-        ls.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: .any)
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: .any)
+        let ls = try NWListener(using: params)
         self.listener = ls
 
         ls.stateUpdateHandler = { [weak self] state in
