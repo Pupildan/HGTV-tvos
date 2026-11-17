@@ -118,8 +118,9 @@ public final class RequestSigner: @unchecked Sendable {
             let medusa = medusaHeader(url: fullURL, body: body, ts: ts)
             headers["x-medusa"] = medusa
 
-            // x-helios
-            headers["x-helios"] = heliosHeader(ts: ts, rticket: rticket)
+            // x-helios：不发送。逆向的 helios 算法算出的值服务器验证不过会导致内容接口
+            // 返空（实测带 x-helios -> 0B，不带 -> 正常返回数据），故直接不发。
+            // headers["x-helios"] = heliosHeader(ts: ts, rticket: rticket)
 
             // x-gorgon
             headers["x-gorgon"] = gorgonHeader(ts: ts, rticket: rticket)
