@@ -213,11 +213,13 @@ public final class APIService: Sendable {
         }
         guard let videoList = vm["video_list"] as? [[String: Any]] else { return nil }
 
-        // 选最高清晰度。实测 video_list 顺序不保证（同一条视频 5 档 quality_type
-        // 40/30/20/10/1，全部带 spade_a；v18 撞到过最低档）。策略：
-        //   1) 有加密流（spade_a 非空）优先在加密流里挑 quality_type 最大者；
-        //   2) 无加密流退回全部候选里 quality_type 最大者；
-        //   3) quality_type 缺失按 Int.min 处理（并列时保留先出现的）。
+        // 选最高清晰度。两个关键事实（CDN 实测，2026-11-18）：
+        //   1) 字节系 quality_type **数值越小质量越高**：q=1=原画。两条视频实测码率
+        //      q=1→1.11/0.71 Mbps、q=10→0.56/0.40、q=40→0.30/0.23（最低）。v19 曾误
+        //      选 max 恰好命中最低档。
+        //   2) video_list 顺序不保证（5 档 40/30/20/10/1，全部带 spade_a），不能靠序位取。
+        // 策略：有加密流（spade_a 非空）在加密流里挑 quality_type **最小**者；
+        // 无加密流退回全部候选最小者；缺失按 Int.max 处理（并列保留先出现的）。
         struct Candidate {
             let url: URL
             let spadeA: String
@@ -239,15 +241,15 @@ public final class APIService: Sendable {
             } else if let s = item["quality_type"] as? String, let q = Int(s) {
                 quality = q
             } else {
-                quality = Int.min
+                quality = Int.max
             }
             let c = Candidate(url: url, spadeA: spade, kid: kid, quality: quality)
             if spade.isEmpty { plain.append(c) } else { encrypted.append(c) }
         }
         let pool = encrypted.isEmpty ? plain : encrypted
-        guard let best = pool.max(by: { $0.quality < $1.quality }) else { return nil }
+        guard let best = pool.min(by: { $0.quality < $1.quality }) else { return nil }
         DiagnosticsLogger.log(
-            "选定清晰度 q=\(best.quality) 加密=\(!best.spadeA.isEmpty) 候选=\(videoList.count) 档",
+            "选定清晰度 q=\(best.quality)（1=原画，越小越清晰）加密=\(!best.spadeA.isEmpty) 候选=\(videoList.count) 档",
             category: "playback", level: .info)
         return PlaybackStream(url: best.url, spadeA: best.spadeA, kid: best.kid)
     }
