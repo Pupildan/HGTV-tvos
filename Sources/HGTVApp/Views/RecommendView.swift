@@ -32,6 +32,11 @@ final class RecommendViewModel {
 
     public init() {}
 
+    /// 懒创建唯一的 AVPlayer（复用，避免 AVPlayerItem 重复 attach 到新 player 崩溃）
+    private func ensurePlayer() {
+        if player == nil { player = AVPlayer() }
+    }
+
     var currentDrama: DramaItem? {
         dramas.indices.contains(currentIndex) ? dramas[currentIndex] : nil
     }
@@ -89,9 +94,10 @@ final class RecommendViewModel {
         currentIndexID = dramas[index].id
         guard let vid = dramas[index].videoId else { return }
 
-        // 命中缓存直接换 item
+        // 命中缓存直接换 item（复用同一个 AVPlayer，避免 AVPlayerItem 重复 attach 崩溃）
         if let cached = cache[vid] {
-            player = AVPlayer(playerItem: cached.item)
+            ensurePlayer()
+            player?.replaceCurrentItem(with: cached.item)
             player?.play()
             return
         }
@@ -131,7 +137,8 @@ final class RecommendViewModel {
                 cache[vid] = (proxy, item)
                 // 仍在当前集才切换（避免快速滑动竞态）
                 guard self.currentIndex == index else { return }
-                self.player = AVPlayer(playerItem: item)
+                self.ensurePlayer()
+                self.player?.replaceCurrentItem(with: item)
                 self.player?.play()
                 DiagnosticsLogger.log("AVPlayer.play() 已调用 vid=\(vid)", category: "playback", level: .info)
                 self.prefetchNext()
