@@ -106,27 +106,33 @@ final class RecommendViewModel {
             do {
                 // 1) 取加密直链 + spade_a
                 let stream = try await APIService.shared.fetchPlayback(vid: vid)
+                DiagnosticsLogger.shared.log("取流成功 vid=\(vid) spadeA.len=\(stream.spadeA.count) url=\(stream.url.absoluteString.prefix(90))", category: "playback", level: .info)
                 guard !stream.spadeA.isEmpty else {
                     self.errorMessage = "未取到内容密钥 (spade_a)"
                     return
                 }
                 // 2) 下载加密 mp4
                 let encrypted = try await APIService.shared.downloadData(from: stream.url)
+                DiagnosticsLogger.shared.log("下载加密 mp4 \(encrypted.count) 字节", category: "playback", level: .info)
                 // 3) 派生密钥
                 let key = try SpadeKey.deriveKey(stream.spadeA)
+                DiagnosticsLogger.shared.log("派生密钥 \(key.map { String(format: "%02x", $0) }.joined())", category: "playback", level: .info)
                 // 4) 解密（后台线程）
                 let plain = try await Task.detached(priority: .userInitiated) {
                     try CENCDecryptor.decrypt(data: encrypted, key: key)
                 }.value
+                DiagnosticsLogger.shared.log("解密输出 \(plain.count) 字节 head=\(plain.prefix(12).map { String(format: "%02x", $0) }.joined())", category: "playback", level: .info)
                 // 5) 本地代理托管明文
                 let proxy = PlaybackProxy(payload: plain)
                 let localURL = try await proxy.start()
+                DiagnosticsLogger.shared.log("本地代理 \(localURL.absoluteString)", category: "playback", level: .info)
                 let item = AVPlayerItem(url: localURL)
                 cache[vid] = (proxy, item)
                 // 仍在当前集才切换（避免快速滑动竞态）
                 guard self.currentIndex == index else { return }
                 self.player = AVPlayer(playerItem: item)
                 self.player?.play()
+                DiagnosticsLogger.shared.log("AVPlayer.play() 已调用 vid=\(vid)", category: "playback", level: .info)
                 self.prefetchNext()
             } catch let e as HTTPError {
                 self.errorMessage = e.errorDescription
