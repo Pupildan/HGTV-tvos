@@ -257,52 +257,28 @@ public enum CENCDecryptor {
         return Data(buf)
     }
 
-    // MARK: - AES-128-CTR（CommonCrypto；CTR 加密=解密）
+    // MARK: - AES-128-CTR（CryptoKit；CommonCrypto 在 framework target 未暴露）
 
-    /// CENC 8 字节 IV → CTR 解密。计数器 16B = IV(8) + 8 字节 big-endian 从 0 起。
+    /// CENC 8 字节 IV → CTR 解密。CENC 计数器 = IV(8) + 8 字节 big-endian 从 0 起，
+    /// keystream 块 k = AES-ECB(counter_k)。用 AES.GCM 生成 keystream：GCM 内部计数器从
+    /// J0+1 开始（J0 = nonce||0x00000002），故把 nonce 设为 IV + 0x00000001，使 GCM 的
+    /// 首个数据计数器 = IV + 0x00000002 = CENC 的 counter_1，逐块对齐。对全零数据加密，
+    /// 密文（去 tag）即 keystream。
     static func ctrCrypt(key: Data, iv: [UInt8], data: [UInt8]) throws -> [UInt8] {
         guard !data.isEmpty else { return data }
-        var counter = [UInt8](repeating: 0, count: 16)
-        for i in 0..<min(iv.count, 16) { counter[i] = iv[i] }
-
-        var cryptor: CCCryptorRef?
-        var status = counter.withUnsafeBytes { (cBuf: UnsafeRawBufferPointer) -> CCCryptorStatus in
-            key.withUnsafeBytes { (kBuf: UnsafeRawBufferPointer) -> CCCryptorStatus in
-                CCCryptorCreateWithMode(
-                    CCOperation(kCCDecryptMode),
-                    CCMode(kCCModeCTR),
-                    CCAlgorithm(kCCAlgorithmAES),
-                    CCPadding(ccNoPadding),
-                    cBuf.baseAddress!,
-                    kBuf.baseAddress!,
-                    key.count,
-                    nil,
-                    0,
-                    0,
-                    &cryptor)
-            }
-        }
-        guard status == kCCSuccess, let ref = cryptor else {
-            throw CENCError.cryptoFailed(status)
-        }
-        defer { CCCryptorRelease(ref) }
-
+        // nonce = IV(8) + 0x00000001（big-endian），使 GCM 首数据计数器对齐 CENC counter_1
+        var nonceBytes = [UInt8](repeating: 0, count: 12)
+        for i in 0..<min(iv.count, 8) { nonceBytes[i] = iv[i] }
+        nonceBytes[11] = 1
+        let nonce = try AES.GCM.Nonce(data: Data(nonceBytes))
+        let symmetricKey = SymmetricKey(data: key)
+        let zeros = Data(repeating: 0, count: data.count)
+        let sealed = try AES.GCM.seal(zeros, using: symmetricKey, nonce: nonce)
+        // sealed.combined = ciphertext(=keystream) || tag(16)
+        let combined = [UInt8](sealed.combined!)
+        guard combined.count >= data.count else { throw CENCError.cryptoFailed(-2) }
         var out = [UInt8](repeating: 0, count: data.count)
-        var moved = 0
-        status = data.withUnsafeBytes { (inBuf: UnsafeRawBufferPointer) -> CCCryptorStatus in
-            out.withUnsafeMutableBytes { (outBuf: UnsafeMutableRawBufferPointer) -> CCCryptorStatus in
-                CCCryptorUpdate(ref,
-                                inBuf.baseAddress!,
-                                data.count,
-                                outBuf.baseAddress!,
-                                out.count,
-                                &moved)
-            }
-        }
-        guard status == kCCSuccess else { throw CENCError.cryptoFailed(status) }
-        if moved < out.count {
-            out.removeLast(out.count - moved)
-        }
+        for i in 0..<data.count { out[i] = data[i] ^ combined[i] }
         return out
     }
 
