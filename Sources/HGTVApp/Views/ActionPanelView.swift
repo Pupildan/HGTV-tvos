@@ -128,28 +128,27 @@ struct ActionPanelView: View {
     @ViewBuilder
     private func button(for action: Action) -> some View {
         let isFocused = focused == action
-        Button {
+        // 自定义可聚焦视图（不用 Button，避免系统焦点效果叠加）
+        VStack(spacing: 8) {
+            Image(systemName: action.symbol)
+                .font(.system(size: 28, weight: .medium))
+            Text(displayTitle(for: action))
+                .font(.callout.weight(.semibold))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .foregroundStyle(isFocused ? Color.black : Color.white.opacity(0.85))
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(isFocused ? Color.white : Color.white.opacity(0.0))
+        )
+        .focusable(true)
+        .focused($focused, equals: action)
+        .onTapGesture {
             idleTick += 1
             // 占位项可选中、可聚焦，但点击不触发业务动作；实功能项抛给宿主
             if action.implemented { onAction(action) }
-        } label: {
-            VStack(spacing: 8) {
-                Image(systemName: action.symbol)
-                    .font(.system(size: 28, weight: .medium))
-                Text(displayTitle(for: action))
-                    .font(.callout.weight(.semibold))
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .foregroundStyle(isFocused ? Color.black : Color.white.opacity(0.85))
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(isFocused ? Color.white : Color.white.opacity(0.0))
-            )
         }
-        .buttonStyle(.plain)
-        .focusEffectDisabled(true)   // 关掉系统焦点效果，用自绘圆角矩形
-        .focused($focused, equals: action)   // 所有按钮可聚焦可选中
     }
 
     /// 弹幕按钮文案联动开关态；其余按钮显示原名。

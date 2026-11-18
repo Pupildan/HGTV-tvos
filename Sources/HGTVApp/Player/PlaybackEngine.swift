@@ -95,11 +95,15 @@ final class PlaybackEngine {
         isLoading = true
         defer { isLoading = false }
         do {
-            // 并发拉所有 tab（各一次请求），用 task group 汇总
+            // 并发拉所有 tab × 2 次（每个 tab 请求 2 次，获得更多内容）
+            // bookmall 无翻页（has_more 恒 false），同一 tab 多次请求返回部分相同内容
+            // 但去重后仍能获得更多新内容（实测每个 tab 两次请求交集 ~3-4 条）
             var allItems: [DramaItem] = []
             let tabSnapshot = feedTabTypes
+            let requestCount = tabSnapshot.count * 2   // 6 次请求（3 tab × 2）
             try await withThrowingTaskGroup(of: [DramaItem].self) { group in
-                for tab in tabSnapshot {
+                for i in 0..<requestCount {
+                    let tab = tabSnapshot[i % tabSnapshot.count]
                     group.addTask {
                         let groups = try await APIService.shared.fetchHome(tabType: tab)
                         return groups.flatMap { $0.items ?? [] }
@@ -119,7 +123,7 @@ final class PlaybackEngine {
             } else {
                 hasLoaded = true
                 errorMessage = nil
-                DiagnosticsLogger.log("首批 feed(tab并发+洗牌) 已加载 \(added.count) 条，总计 \(items.count)",
+                DiagnosticsLogger.log("首批 feed(tab并发×2+洗牌) 已加载 \(added.count) 条，总计 \(items.count)",
                                       category: "playback", level: .info)
             }
         } catch {
@@ -229,7 +233,7 @@ final class PlaybackEngine {
             let vid = currentDrama?.videoId ?? "?"
             DiagnosticsLogger.log("居中切到 index=\(index) vid=\(vid)", category: "playback", level: .info)
         }
-        if index >= items.count - 3 {
+        if index >= items.count - 5 {
             onNeedMore?()
         }
     }
