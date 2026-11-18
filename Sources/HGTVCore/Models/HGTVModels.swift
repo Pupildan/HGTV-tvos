@@ -24,7 +24,9 @@ public struct APIEnvelope<T: Decodable>: Decodable {
 }
 
 // MARK: - 剧集条目（书 / 短剧）
-public struct DramaItem: Identifiable, Codable, Hashable {
+// Sendable：纯值类型，全部存储属性（String?/URL?/Int?/Double?）均为 Sendable，
+// 供 PlaybackEngine 并发拉取 feed 时跨 task 边界传递（Swift 6 严格并发）。
+public struct DramaItem: Identifiable, Codable, Hashable, Sendable {
     // id 只依赖存储属性，避免在 Hashable 合成 hash 里访问 hashValue 造成递归
     public var id: String { bookId ?? videoId ?? title ?? "" }
     public let bookId: String?
