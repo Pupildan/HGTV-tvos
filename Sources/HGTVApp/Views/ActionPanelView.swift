@@ -127,6 +127,7 @@ struct ActionPanelView: View {
 
     @ViewBuilder
     private func button(for action: Action) -> some View {
+        let isFocused = focused == action
         Button {
             idleTick += 1
             // 占位项可选中、可聚焦，但点击不触发业务动作；实功能项抛给宿主
@@ -138,12 +139,16 @@ struct ActionPanelView: View {
                 Text(displayTitle(for: action))
                     .font(.callout.weight(.semibold))
             }
-            .padding(.horizontal, 26)
-            .padding(.vertical, 18)
-            .foregroundStyle(Color.white.opacity(0.85))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .foregroundStyle(isFocused ? Color.black : Color.white.opacity(0.85))
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isFocused ? Color.white : Color.white.opacity(0.0))
+            )
         }
         .buttonStyle(.plain)
-        // v32：选中效果只保留系统圆角矩形焦点框（去掉自绘胶囊/放大/字体变色）。
+        .focusEffectDisabled(true)   // 关掉系统焦点效果，用自绘圆角矩形
         .focused($focused, equals: action)   // 所有按钮可聚焦可选中
     }
 
