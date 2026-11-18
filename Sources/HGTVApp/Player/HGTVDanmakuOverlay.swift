@@ -99,8 +99,8 @@ final class DanmakuOverlay: UIView {
     }
     /// 单 overlay 开关
     var enabled = true
-    /// 弹幕开关通知 token（block observer 必须持 token 才能注销；let 供 deinit 注销）
-    private let toggleObs: NSObjectProtocol?
+    /// 弹幕开关通知 token（block observer 必须持 token 才能注销；var 供 deinit 注销）
+    private var toggleObs: NSObjectProtocol? = nil
 
     var currentVid: String { loadedVid }
 
