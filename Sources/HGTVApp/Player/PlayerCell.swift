@@ -46,11 +46,11 @@ final class PlayerLayerView: UIView {
 }
 
 /// 全屏 cell：底层 playerLayerView + 顶层封面兜底（首帧未到时显示封面）。
+// ⚠️ cell 保持默认可聚焦（tvOS 焦点引擎靠它在上下滑动时移动焦点 → collection
+// 自动滚动 = 切换短剧）。v22 曾误设 canBecomeFocused=false 想改走焦点代理，
+// 把这个本来就工作的核心机制杀掉了（真机反馈三处遥控交互全失效）。
 final class PlayerCell: UICollectionViewCell {
     static let reuseID = "PlayerCell"
-
-    // v22：cell 不参与焦点（全屏视频页的滑动方向由 SwipeFocusProxyView 统一接管）
-    override var canBecomeFocused: Bool { false }
 
     let playerLayerView = PlayerLayerView(frame: .zero)
     let coverImageView = UIImageView(frame: .zero)

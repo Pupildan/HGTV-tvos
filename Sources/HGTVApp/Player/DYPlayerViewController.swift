@@ -43,7 +43,6 @@ final class DYPlayerViewController: UIViewController {
         setupCollectionView()
         wireCallbacks()
         installLoopObserver()
-        installSwipeFocusRouting()
 
         Task { [weak self] in
             guard let self else { return }
@@ -268,11 +267,15 @@ final class DYPlayerViewController: UIViewController {
     private func advance() { scrollTo(index: engine.index + 1, animated: true) }
     private func rewind() { scrollTo(index: engine.index - 1, animated: true) }
 
-    // MARK: - 遥控（v22：左右切集 + 确认键进详情）
+    // MARK: - 遥控（v24 修正版）
 
-    /// Siri Remote 的按键走 UIPress.type（press.key 只对物理键盘非 nil——
-    /// 旧实现检查 press.key 导致遥控按键全部被跳过，这就是「没有切换入口」的根因之一）。
-    /// 交互（用户指定）：遥控**左右**滑动/点击环左右 = 上一集/下一集；中键确认 = 进入当前剧详情页。
+    /// 遥控交互模型（基于 tvOS 焦点引擎的真实行为，v23 的焦点代理方案在 SwiftUI
+    /// 环境下拿不到焦点、还误杀了 cell 焦点机制，真机三处交互全失效——教训见坑 16）：
+    ///   - **上下滑动**：cell 保持默认可聚焦 → 焦点引擎在 cell 间移动焦点 →
+    ///     collection 自动滚动 = 切换不同短剧（v22 之前就在工作的原生机制，勿动）。
+    ///   - **左右滑动**：横向没有可聚焦目标 → 焦点引擎放弃该方向 → 方向按键
+    ///     **回落到 pressesBegan** → 这里翻译成上一集/下一集。
+    ///   - **中键确认**：非方向键，直达 responder 链 → 进当前剧详情页。
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
@@ -296,77 +299,6 @@ final class DYPlayerViewController: UIViewController {
         }
         if handled { return }
         super.pressesBegan(presses, with: event)
-    }
-
-    /// 触控板滑动走焦点引擎（不产生 UIPress）。用「全屏 UIFocusGuide + 不可见代理视图」
-    /// 拦截滑动方向（唯一拦截点，避免多处响应导致一次滑动翻两页）：
-    /// 左/右 = 上一集/下一集；上/下按需求吞掉不作为切换入口。
-    private var focusProxy: SwipeFocusProxyView?
-    private var swipeFocusGuide: UIFocusGuide?
-
-    /// 把焦点拉进播放器（否则触控板滑动可能作用在 tab 栏上）。
-    override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        if let focusProxy {
-            return [focusProxy] + super.preferredFocusEnvironments
-        }
-        return super.preferredFocusEnvironments
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
-    }
-
-    /// 全屏不可见焦点代理：接收滑动方向并翻译成翻页动作。
-    /// 注意 UIFocusHeading 是 OptionSet（可能组合值），用 contains 判断而非 switch。
-    final class SwipeFocusProxyView: UIView {
-        var onDirection: ((UIFocusHeading) -> Void)?
-
-        override var canBecomeFocused: Bool { true }
-
-        override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
-            // tvOS：方向属性是 focusHeading（UIFocusHeading OptionSet）
-            let heading = context.focusHeading
-            if heading.contains(.left) || heading.contains(.right) {
-                onDirection?(heading)
-                return false
-            }
-            if heading.contains(.up) || heading.contains(.down) {
-                return false // 上下按需求不作为切换入口，吞掉保持焦点稳定
-            }
-            return super.shouldUpdateFocus(in: context)
-        }
-    }
-
-    private func installSwipeFocusRouting() {
-        guard swipeFocusGuide == nil else { return }
-        let proxy = SwipeFocusProxyView(frame: view.bounds)
-        proxy.backgroundColor = .clear
-        proxy.alpha = 0.02   // 完全透明(alpha 0)的 view 不能聚焦，给一点可见度
-        proxy.isUserInteractionEnabled = false
-        proxy.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        proxy.onDirection = { [weak self] heading in
-            guard let self else { return }
-            if heading.contains(.left) {
-                self.rewind()
-            } else if heading.contains(.right) {
-                self.advance()
-            }
-        }
-        view.addSubview(proxy)
-        focusProxy = proxy
-
-        let guide = UIFocusGuide()
-        guide.preferredFocusEnvironments = [proxy]
-        view.addLayoutGuide(guide)
-        NSLayoutConstraint.activate([
-            guide.topAnchor.constraint(equalTo: view.topAnchor),
-            guide.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            guide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            guide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        ])
-        swipeFocusGuide = guide
     }
 
     /// 离开时停播并移除循环观察（避免 deinit 访问 actor 隔离属性）。
