@@ -472,7 +472,8 @@ class DanmakuVerticalTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
             }
         }
     }
-    
+
+    @MainActor
     private func addAnimation(to danmaku: DanmakuCell) {
         guard let cellModel = danmaku.model else { return }
         danmaku.animationBeginTime = CFAbsoluteTimeGetCurrent()
@@ -503,6 +504,7 @@ class DanmakuVerticalTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
     
 }
 
+@MainActor
 func prepare(danmaku: DanmakuCell) {
     danmaku.animationTime = 0
     danmaku.animationBeginTime = 0

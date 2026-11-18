@@ -280,7 +280,9 @@ public class DanmakuView: PlatformView {
 #endif
     
     deinit {
-        stop()
+        MainActor.assumeIsolated {
+            stop()
+        }
     }
     
 #if os(macOS)
