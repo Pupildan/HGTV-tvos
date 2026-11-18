@@ -70,8 +70,8 @@ struct ActionPanelView: View {
         // defaultFocus：视图刚出现时 focus 引擎可能还没就绪，onAppear 里赋值偶发失效，
         // 由 defaultFocus 兜底保证焦点落到首个可用按钮（tvOS 17+）。
         .defaultFocus($focused, initialFocus)
-        // 弹窗显示期间焦点在本视图，menu 键不会传到底层 DYPlayerViewController，
-        // 故由这里的 MenuDismiss 负责关闭（与播放器 onMenuKey 互斥，不会重复触发）。
+        // v25：弹窗显示期间按返回键（.menu）关闭——这是符合直觉的返回操作，
+        // 与播放器的中键呼出（onSelectKey）各管各的，不会冲突。
         .background(MenuDismiss { onDismiss() })
     }
 

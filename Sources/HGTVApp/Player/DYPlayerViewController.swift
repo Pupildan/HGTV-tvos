@@ -25,10 +25,9 @@ final class DYPlayerViewController: UIViewController {
     private var isLoadingMore = false
     private var playToEndObserver: NSObjectProtocol?
 
-    /// 按确认键（遥控中键）请求进入当前剧的详情页（v22）。由 SwiftUI 侧注册。
-    var onSelectSeries: ((String, String?) -> Void)?
-    /// 遥控返回键（.menu）→ 通知 SwiftUI 呼出/收起底部功能弹窗（v24）。
-    var onMenuKey: (() -> Void)?
+    /// 遥控确认键（中键 .select）→ 通知 SwiftUI 呼出底部功能弹窗（v25）。
+    /// 不再用返回键呼出（返回键交还系统做正常返回/关闭浮层），也取消中键直接进详情。
+    var onSelectKey: (() -> Void)?
     /// 返回推荐流后整表 reload + 回到第 0 条（v24）。
     private func handleFeedRestored() {
         manager.pauseAll()
@@ -51,7 +50,8 @@ final class DYPlayerViewController: UIViewController {
         setupCollectionView()
         wireCallbacks()
         installLoopObserver()
-        installMenuKey()
+        // v25：不再拦截返回键呼出弹窗——返回键交还 tvOS 系统做正常返回/关闭浮层；
+        // 弹窗改由确认键（中键）在 pressesBegan 里呼出。
 
         Task { [weak self] in
             guard let self else { return }
@@ -280,22 +280,7 @@ final class DYPlayerViewController: UIViewController {
     private func advance() { scrollTo(index: engine.index + 1, animated: true) }
     private func rewind() { scrollTo(index: engine.index - 1, animated: true) }
 
-    /// 安装返回键（Menu）识别器。tvOS 上 menu 按压不走 pressesBegan 的 press.type，
-    /// 必须像项目现有的 MenuDismiss 那样用 UITapGestureRecognizer + allowedPressTypes=[.menu]。
-    /// 该识别器只在焦点位于本控制器（未呼出弹窗）时触发「打开弹窗」；
-    /// 弹窗显示后焦点转移到 SwiftUI 按钮，由 ActionPanelView 的 MenuDismiss 负责关闭，二者互斥。
-    private func installMenuKey() {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
-        tap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
-        tap.cancelsTouchesInView = false
-        view.addGestureRecognizer(tap)
-    }
-
-    @objc private func menuPressed() {
-        onMenuKey?()
-    }
-
-    // MARK: - 遥控（v24 修正版）
+    // MARK: - 遥控（v25：中键呼出弹窗，返回键交还系统）
 
     /// 遥控交互模型（基于 tvOS 焦点引擎的真实行为，v23 的焦点代理方案在 SwiftUI
     /// 环境下拿不到焦点、还误杀了 cell 焦点机制，真机三处交互全失效——教训见坑 16）：
@@ -303,7 +288,9 @@ final class DYPlayerViewController: UIViewController {
     ///     collection 自动滚动 = 切换不同短剧（v22 之前就在工作的原生机制，勿动）。
     ///   - **左右滑动**：横向没有可聚焦目标 → 焦点引擎放弃该方向 → 方向按键
     ///     **回落到 pressesBegan** → 这里翻译成上一集/下一集。
-    ///   - **中键确认**：非方向键，直达 responder 链 → 进当前剧详情页。
+    ///   - **中键确认**：非方向键，直达 responder 链 → 呼出底部功能弹窗（v25）。
+    ///     原「中键直接进详情」已取消，选集改从弹窗里的「选集」按钮进入。
+    ///   - **返回键**：v25 起不再拦截，交还 tvOS 系统做正常返回/关闭浮层。
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
@@ -315,12 +302,9 @@ final class DYPlayerViewController: UIViewController {
                 advance()
                 handled = true
             case .select:
-                // 中键确认：进入当前剧集详情（有 seriesId 才响应）
-                if let drama = engine.currentDrama,
-                   let sid = drama.seriesId, !sid.isEmpty {
-                    onSelectSeries?(sid, engine.currentVid)
-                    handled = true
-                }
+                // v25：中键呼出底部功能弹窗（选集/评论/弹幕/返回推荐都在这里）
+                onSelectKey?()
+                handled = true
             default:
                 break
             }

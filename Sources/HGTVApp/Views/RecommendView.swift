@@ -24,7 +24,7 @@ struct RecommendView: View {
     @State private var infoVisible = true
     /// 居中加载圈兜底开关（3 秒强制关闭）。
     @State private var spinnerVisible = true
-    /// 按 OK 键进入的剧集详情（nil=不显示）。确认键 → 拉详情 → 选集网格。
+    /// 剧集详情（nil=不显示）。v25：由底部弹窗的「选集」按钮进入（不再用中键直接进）。
     @State private var detailSeriesId: String?
     /// 打开详情时的剧信息（选集后回填到连播标题/封面）。
     @State private var detailDrama: DramaItem?
@@ -37,12 +37,9 @@ struct RecommendView: View {
 
             // 全屏分页播放器（底层）
             NativePlayerView(engine: engine,
-                             onSelectSeries: { sid in
-                                 detailDrama = engine.currentDrama
-                                 detailSeriesId = sid
-                             },
-                             onMenuKey: {
-                                 // 仅负责打开；关闭由 ActionPanelView 的 MenuDismiss 处理
+                             onSelectKey: {
+                                 // 中键呼出弹窗（v25）；返回键交还系统，不再拦。
+                                 // 关闭仍由 ActionPanelView 的 MenuDismiss（返回键）处理。
                                  if !actionPanelVisible {
                                      withAnimation { actionPanelVisible = true }
                                  }

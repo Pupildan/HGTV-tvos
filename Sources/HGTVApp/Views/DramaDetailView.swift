@@ -341,7 +341,7 @@ struct EpisodePlayerSheet: View {
     let vid: String
     @State private var viewModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
-    /// v24：遥控返回键呼出底部功能弹窗
+    /// v25：遥控中键（.select）呼出底部功能弹窗；返回键交还系统做正常返回/关闭浮层。
     @State private var panelVisible = false
 
     var body: some View {
@@ -360,9 +360,9 @@ struct EpisodePlayerSheet: View {
                 }
             }
         }
-        // menu 键：弹窗开着时交给 ActionPanelView 的 MenuDismiss 关闭；
-        // 没开时这里负责呼出（闭包有状态判断，避免双层 recognizer 冲突）。
-        .background(MenuDismiss {
+        // v25：中键（.select）呼出弹窗；返回键 .menu 不再拦——交还系统正常返回/关闭浮层。
+        // 弹窗开着时，关闭由 ActionPanelView 内的 MenuDismiss（.menu）负责，二者分工不冲突。
+        .background(MenuDismiss(pressType: .select) {
             if !panelVisible {
                 withAnimation { panelVisible = true }
             }
@@ -397,23 +397,31 @@ struct EpisodePlayerSheet: View {
     }
 }
 
-/// Menu 键关闭播放浮层（拦截 menu 按压后手动 dismiss）。
+/// 遥控按键捕获器（拦截指定按键并回调）。
+/// 默认 .menu：用于关闭弹窗/浮层；可传 .select：用于中键呼出弹窗（v25）。
 struct MenuDismiss: UIViewRepresentable {
     let onMenu: () -> Void
+    /// 要捕获的按键类型，默认返回键 .menu。
+    var pressType: UIPress.PressType = .menu
 
-    func makeUIView(context: Context) -> MenuCatchView { MenuCatchView() }
+    func makeUIView(context: Context) -> MenuCatchView {
+        MenuCatchView(pressType: pressType)
+    }
     func updateUIView(_ v: MenuCatchView, context: Context) { v.onMenu = onMenu }
 
     final class MenuCatchView: UIView {
         var onMenu: () -> Void = {}
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            let t = UITapGestureRecognizer(target: self, action: #selector(menuTapped))
-            t.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        let pressType: UIPress.PressType
+
+        init(pressType: UIPress.PressType) {
+            self.pressType = pressType
+            super.init(frame: .zero)
+            let t = UITapGestureRecognizer(target: self, action: #selector(keyPressed))
+            t.allowedPressTypes = [NSNumber(value: pressType.rawValue)]
             addGestureRecognizer(t)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
-        @objc private func menuTapped() { onMenu() }
+        @objc private func keyPressed() { onMenu() }
     }
 }
 
