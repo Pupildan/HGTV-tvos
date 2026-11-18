@@ -125,21 +125,22 @@ struct ActionPanelView: View {
             // 占位项可选中、可聚焦，但点击不触发业务动作；实功能项抛给宿主
             if action.implemented { onAction(action) }
         } label: {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 Image(systemName: action.symbol)
-                    .font(.system(size: 32, weight: .medium))
+                    .font(.system(size: 28, weight: .medium))
                 Text(action.rawValue)
                     .font(.callout.weight(.semibold))
             }
-            .frame(width: 148, height: 88)
-            .foregroundStyle(.white.opacity(focused == action ? 1 : 0.8))
+            // 胶囊贴身包裹内容（不再用大固定框），聚焦时黑字黑图标（同原系统卡片观感）
+            .padding(.horizontal, 26)
+            .padding(.vertical, 18)
+            .foregroundStyle(focused == action ? Color.black : Color.white.opacity(0.85))
             .background {
-                // 胶囊形选中底色：聚焦时点亮（自绘，替代系统白色方块）
                 Capsule()
-                    .fill(Color.white.opacity(focused == action ? 0.22 : 0))
+                    .fill(focused == action ? Color.white.opacity(0.92) : Color.white.opacity(0))
             }
             // 选中轻微放大动画（弹性）
-            .scaleEffect(focused == action ? 1.08 : 1.0)
+            .scaleEffect(focused == action ? 1.06 : 1.0)
             .animation(.spring(response: 0.28, dampingFraction: 0.7), value: focused == action)
         }
         .buttonStyle(.plain)

@@ -66,6 +66,9 @@ final class DYPlayerViewController: UIViewController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
 
+    // 注意：不加 deinit——Swift 6 下 deinit 非隔离，访问 MainActor 属性会编译失败
+    //（endCheckTimer/playToEndObserver 与控制器同生命周期，随进程结束释放）。
+
     // MARK: - 生命周期
 
     override func viewDidLoad() {
@@ -172,8 +175,11 @@ final class DYPlayerViewController: UIViewController {
         }
     }
 
-    /// 播完自动切下一集（v22 A1；v23 增加跳过无流条目）：居中条目播完 → 向前找最近
-    /// 可播条目；已是最后一条则先补 feed 再切。
+    /// 播完自动切下一集（v22 A1；v23 增加跳过无流条目；v31 增加轮询兜底）。
+    /// 通知路径：AVPlayerItemDidPlayToEndTime。
+    /// 轮询路径（v31）：本地代理流若未正确标记流结尾（Content-Length/连接关闭），
+    /// AVPlayer 会停在最后一帧却认为仍在缓冲 → 通知永不触发。轮询每 0.5s 检查
+    /// 居中播放器「已播进度 ≥ 时长 - 0.5s」兜底切集。两条路径共用 autoAdvance，幂等。
     private func installLoopObserver() {
         guard playToEndObserver == nil else { return }
         // 用字面量构造（部分 SDK 解析不到该符号）。
@@ -187,16 +193,59 @@ final class DYPlayerViewController: UIViewController {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let centered = self.manager.peekPlayer(at: self.engine.index)
-                guard centered?.currentItem === ended else { return }
+                let matched = centered?.currentItem === ended
+                DiagnosticsLogger.log("收到播完通知 匹配居中条=\(matched)", category: "playback", level: .debug)
+                guard matched else { return }
+                self.autoAdvance()
+            }
+        }
+        installEndCheckTimer()
+    }
+
+    // MARK: - 播完兜底轮询 + 自动切集（v31）
+
+    /// 兜底播完检测计时器。
+    private var endCheckTimer: Timer?
+    /// 最近一次自动切集时间（幂等去重：通知与轮询不会重复触发；3s 内只切一次）。
+    private var lastAutoAdvanceAt = Date.distantPast
+
+    private func installEndCheckTimer() {
+        guard endCheckTimer == nil else { return }
+        endCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.checkPlaybackEnded() }
+        }
+    }
+
+    /// 居中条目播完检测：已播进度到达片尾即切下一集（不依赖 EOS 通知）。
+    private func checkPlaybackEnded() {
+        guard let player = manager.peekPlayer(at: engine.index),
+              let item = player.currentItem,
+              item.status == .readyToPlay,
+              item.duration.seconds.isFinite, item.duration.seconds > 1 else { return }
+        let cur = player.currentTime().seconds
+        if cur >= item.duration.seconds - 0.5 {
+            DiagnosticsLogger.log("轮询检测到播完 cur=\(String(format: "%.1f", cur))s dur=\(String(format: "%.1f", item.duration.seconds))s",
+                                  category: "playback", level: .debug)
+            autoAdvance()
+        }
+    }
+
+    /// 自动切下一集（通知/轮询共用入口）。3s 去重防止双路径重复触发。
+    private func autoAdvance() {
+        guard Date().timeIntervalSince(lastAutoAdvanceAt) > 3 else { return }
+        lastAutoAdvanceAt = Date()
+        if let next = engine.nearestPlayableIndex(after: engine.index, forwardOnly: true) {
+            DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
+            scrollTo(index: next, animated: true)
+        } else {
+            // 向前无可播：补一批 feed 后再试（剧集连播看完自动续接推荐流）
+            Task { [weak self] in
+                guard let self else { return }
+                await self.loadMoreAndSync()
+                guard Date().timeIntervalSince(self.lastAutoAdvanceAt) > 3 else { return }
                 if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
-                    DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
+                    self.lastAutoAdvanceAt = Date()
                     self.scrollTo(index: next, animated: true)
-                } else {
-                    // 向前无可播：补一批 feed 后再试一次
-                    await self.loadMoreAndSync()
-                    if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
-                        self.scrollTo(index: next, animated: true)
-                    }
                 }
             }
         }
