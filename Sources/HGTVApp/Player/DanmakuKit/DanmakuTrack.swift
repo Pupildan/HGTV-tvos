@@ -62,6 +62,7 @@ let DANMAKU_CELL_KEY = "DANMAKU_CELL_KEY"
 
 //MARK: DanmakuFloatingTrack
 
+@MainActor
 class DanmakuFloatingTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
     
     var positionY: CGFloat = 0 {
@@ -301,6 +302,7 @@ class DanmakuFloatingTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
 
 //MARK: DanmakuVerticalTrack
 
+@MainActor
 class DanmakuVerticalTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
     
     var positionY: CGFloat = 0 {
