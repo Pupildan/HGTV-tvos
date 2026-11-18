@@ -97,9 +97,13 @@ struct ActionPanelView: View {
             acceptDismiss = true
             DiagnosticsLogger.log("弹窗冷却结束，开始接受关闭", category: "playback", level: .debug)
         }
-        // 5s 无操作自动隐藏；idleTick 变化会取消并重启计时
+        // 5s 无操作自动隐藏；idleTick 变化会取消并重启计时。
+        // 关键：sleep 被取消时 try? 会吞掉 CancellationError，必须显式检查
+        // Task.isCancelled，否则每次焦点切换（idleTick+1 取消旧任务）都会
+        // 误触发一次关闭——这正是「按钮间切换马上消失」的根因（v29）。
         .task(id: idleTick) {
             try? await Task.sleep(nanoseconds: UInt64(autoHideSeconds) * 1_000_000_000)
+            guard !Task.isCancelled else { return }
             requestDismiss(reason: "5s无操作")
         }
     }
@@ -121,16 +125,25 @@ struct ActionPanelView: View {
             // 占位项可选中、可聚焦，但点击不触发业务动作；实功能项抛给宿主
             if action.implemented { onAction(action) }
         } label: {
-            VStack(spacing: 14) {
+            VStack(spacing: 10) {
                 Image(systemName: action.symbol)
-                    .font(.system(size: 40, weight: .medium))   // 图标统一大小
+                    .font(.system(size: 32, weight: .medium))
                 Text(action.rawValue)
-                    .font(.body.weight(.semibold))
+                    .font(.callout.weight(.semibold))
             }
-            .frame(width: 180, height: 120)
-            .foregroundStyle(.primary)                          // 占位项也用主色，不再灰显
+            .frame(width: 148, height: 88)
+            .foregroundStyle(.white.opacity(focused == action ? 1 : 0.8))
+            .background {
+                // 胶囊形选中底色：聚焦时点亮（自绘，替代系统白色方块）
+                Capsule()
+                    .fill(Color.white.opacity(focused == action ? 0.22 : 0))
+            }
+            // 选中轻微放大动画（弹性）
+            .scaleEffect(focused == action ? 1.08 : 1.0)
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: focused == action)
         }
         .buttonStyle(.plain)
-        .focused($focused, equals: action)                      // 所有按钮可聚焦可选中
+        .focusEffectDisabled(true)      // 关闭系统默认白色方块选中效果，用上面的自绘胶囊
+        .focused($focused, equals: action)   // 所有按钮可聚焦可选中
     }
 }
