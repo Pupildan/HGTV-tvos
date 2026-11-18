@@ -39,7 +39,7 @@ struct RecommendView: View {
             NativePlayerView(engine: engine,
                              onSelectKey: {
                                  // 中键呼出弹窗（v25）；返回键交还系统，不再拦。
-                                 // 关闭由 ActionPanelView 的 onExitCommand / 遮罩 / 5s 计时处理。
+                                 // 关闭由 ActionPanelView 的 MenuDismiss(.menu) / 遮罩 / 5s 计时处理。
                                  if !actionPanelVisible {
                                      withAnimation { actionPanelVisible = true }
                                  }

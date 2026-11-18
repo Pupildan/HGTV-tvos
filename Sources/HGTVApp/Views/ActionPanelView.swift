@@ -7,10 +7,14 @@
 // 焦点约定（v26 修正）：
 //   - 出现时焦点落到首个可用按钮（defaultFocus + onAppear 双保险）；
 //   - .focusSection() 把焦点困在弹窗内，配合宿主让底层 collectionView 退出焦点；
-//   - 返回键用 SwiftUI 原生 .onExitCommand 关闭（tvOS 标准，仅当焦点属于本视图时触发）；
+//   - 返回键用 MenuDismiss 手势识别器关闭（v29：弃用 .onExitCommand——
+//     真机日志证实它在焦点转移时会误触发，导致弹窗打开后 25ms 内被瞬间关闭）；
+//   - 出现后 500ms 内忽略一切 dismiss 请求（冷却窗口，挡住同一次按键的
+//     touch-up 被新遮罩手势误判、以及焦点转移期间的杂散 exit 事件）；
 //   - 任何焦点移动/点击都重置 5s 无操作计时，到时自动关闭。
 
 import SwiftUI
+import HGTVCore
 
 struct ActionPanelView: View {
     /// 弹窗功能项。占位项 implemented=false：可选中、可聚焦，但点击暂无实际功能。
@@ -51,13 +55,15 @@ struct ActionPanelView: View {
     @FocusState private var focused: Action?
     /// 每次交互自增，用于重启 idle 计时。
     @State private var idleTick = 0
+    /// 出现冷却：true 之后才接受 dismiss（v29 防瞬间误关）。
+    @State private var acceptDismiss = false
 
     var body: some View {
         ZStack {
             // 遮罩：点击空白处关闭（tvOS 触控板点击）
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
-                .onTapGesture { onDismiss() }
+                .onTapGesture { requestDismiss(reason: "遮罩点击") }
 
             VStack {
                 Spacer()
@@ -73,20 +79,39 @@ struct ActionPanelView: View {
                 .padding(.bottom, 80)
             }
         }
+        .background(MenuDismiss { requestDismiss(reason: "返回键") })
         .onAppear {
             focused = initialFocus
             idleTick += 1
+            DiagnosticsLogger.log("弹窗出现，冷却开始", category: "playback", level: .debug)
         }
         .defaultFocus($focused, initialFocus)   // 视图出现时焦点兜底
-        // tvOS 返回键标准处理：焦点在本视图时触发关闭（比 UITapGestureRecognizer 可靠）
-        .onExitCommand(perform: onDismiss)
         // 焦点在按钮间移动 = 有操作，重置 idle 计时
-        .onChange(of: focused) { _, _ in idleTick += 1 }
+        .onChange(of: focused) { _, newValue in
+            idleTick += 1
+            DiagnosticsLogger.log("弹窗焦点=\(newValue?.rawValue ?? "nil")", category: "playback", level: .debug)
+        }
+        // 出现 500ms 后开始接受 dismiss（冷却窗口结束）
+        .task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            acceptDismiss = true
+            DiagnosticsLogger.log("弹窗冷却结束，开始接受关闭", category: "playback", level: .debug)
+        }
         // 5s 无操作自动隐藏；idleTick 变化会取消并重启计时
         .task(id: idleTick) {
             try? await Task.sleep(nanoseconds: UInt64(autoHideSeconds) * 1_000_000_000)
-            onDismiss()   // View.task 闭包运行于 MainActor，可直接调用
+            requestDismiss(reason: "5s无操作")
         }
+    }
+
+    /// 统一的 dismiss 入口：冷却期内一律忽略（防止出现瞬间的杂散事件误关弹窗）。
+    private func requestDismiss(reason: String) {
+        guard acceptDismiss else {
+            DiagnosticsLogger.log("弹窗忽略冷却期内 dismiss(\(reason))", category: "playback", level: .debug)
+            return
+        }
+        DiagnosticsLogger.log("弹窗关闭(\(reason))", category: "playback", level: .debug)
+        onDismiss()
     }
 
     @ViewBuilder
