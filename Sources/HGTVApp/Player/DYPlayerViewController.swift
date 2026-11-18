@@ -43,15 +43,32 @@ final class DYPlayerViewController: UIViewController {
     func setPanelActive(_ active: Bool) {
         guard panelActive != active else { return }
         panelActive = active
-        collectionView.isUserInteractionEnabled = !active
+        // v27：只关焦点（allowsFocus），不再动 isUserInteractionEnabled——
+        // 后者会连手势识别器一起禁掉，导致弹窗关闭后确认键再也收不到（呼不出的回归根因）。
         if #available(tvOS 15.0, *) {
             collectionView.allowsFocus = !active
         }
         // 让焦点系统重新计算：退出时从 collectionView 移走，恢复时回到当前 cell
         view.setNeedsFocusUpdate()
         view.updateFocusIfNeeded()
-        DiagnosticsLogger.log("弹窗\(active ? "打开" : "关闭")：collectionView 焦点/交互 \(active ? "禁用" : "恢复")",
+        DiagnosticsLogger.log("弹窗\(active ? "打开" : "关闭")：collectionView 焦点 \(active ? "禁用" : "恢复")",
                               category: "playback", level: .debug)
+    }
+
+    /// 确认键（.select）手势识别器。tvOS 上 .select 常被焦点系统消费，
+    /// pressesBegan 的 case .select 时有时收不到，故改用手势识别器（与项目既有 menu 方案一致）。
+    private func installSelectKey() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(selectPressed))
+        tap.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
+        tap.cancelsTouchesInView = false
+        view.addGestureRecognizer(tap)
+    }
+
+    @objc private func selectPressed() {
+        // 弹窗已显示时焦点在 SwiftUI 按钮上，本识别器不会触发；这里只负责呼出。
+        guard !panelActive else { return }
+        DiagnosticsLogger.log("确认键(.select)手势触发，呼出弹窗", category: "playback", level: .debug)
+        onSelectKey?()
     }
 
     init(engine: PlaybackEngine) {
@@ -69,8 +86,9 @@ final class DYPlayerViewController: UIViewController {
         setupCollectionView()
         wireCallbacks()
         installLoopObserver()
-        // v25：不再拦截返回键呼出弹窗——返回键交还 tvOS 系统做正常返回/关闭浮层；
-        // 弹窗改由确认键（中键）在 pressesBegan 里呼出。
+        // v27：确认键（中键）呼出弹窗改用手势识别器（allowedPressTypes=[.select]）——
+        // tvOS 上 .select 常被焦点系统消费，pressesBegan 收不到；手势识别器是项目验证过的可靠方式。
+        installSelectKey()
 
         Task { [weak self] in
             guard let self else { return }
@@ -307,8 +325,8 @@ final class DYPlayerViewController: UIViewController {
     ///     collection 自动滚动 = 切换不同短剧（v22 之前就在工作的原生机制，勿动）。
     ///   - **左右滑动**：横向没有可聚焦目标 → 焦点引擎放弃该方向 → 方向按键
     ///     **回落到 pressesBegan** → 这里翻译成上一集/下一集。
-    ///   - **中键确认**：非方向键，直达 responder 链 → 呼出底部功能弹窗（v25）。
-    ///     原「中键直接进详情」已取消，选集改从弹窗里的「选集」按钮进入。
+    ///   - **中键确认**：v27 改由 installSelectKey 手势识别器呼出底部功能弹窗
+    ///     （pressesBegan 常收不到 .select）。原「中键直接进详情」已取消。
     ///   - **返回键**：v25 起不再拦截，交还 tvOS 系统做正常返回/关闭浮层。
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
@@ -320,11 +338,8 @@ final class DYPlayerViewController: UIViewController {
             case .rightArrow:
                 advance()
                 handled = true
-            case .select:
-                // v25：中键呼出底部功能弹窗（选集/评论/弹幕/返回推荐都在这里）
-                onSelectKey?()
-                handled = true
             default:
+                // v27：.select 已改由 installSelectKey 手势识别器处理（pressesBegan 常收不到）
                 break
             }
         }
