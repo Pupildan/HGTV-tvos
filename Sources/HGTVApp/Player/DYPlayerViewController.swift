@@ -314,7 +314,10 @@ final class DYPlayerViewController: UIViewController {
         let item = engine.items[index]
         let durationMs = Int(player.currentItem?.duration.seconds.isFinite == true
                              ? player.currentItem!.duration.seconds * 1000 : 0)
-        cell.configureDanmaku(vid: engine.vid(at: index) ?? "",
+        let danmakuVid = engine.vid(at: index) ?? ""
+        DiagnosticsLogger.log("🔍 [弹幕诊断] bind() 调用 configureDanmaku vid=\(danmakuVid) bookId=\(item.seriesId ?? "nil") durationMs=\(durationMs)",
+                              category: "danmaku", level: .info)
+        cell.configureDanmaku(vid: danmakuVid,
                               bookId: item.seriesId,
                               durationMs: max(0, durationMs))
     }

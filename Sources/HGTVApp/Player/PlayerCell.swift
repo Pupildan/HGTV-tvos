@@ -130,6 +130,8 @@ final class PlayerCell: UICollectionViewCell {
 
     /// bind 后由控制器调用：挂 player + 换集取弹幕。
     func configureDanmaku(vid: String, bookId: String?, durationMs: Int) {
+        DiagnosticsLogger.log("🔍 [弹幕诊断] PlayerCell.configureDanmaku vid=\(vid) bookId=\(bookId ?? "nil") durationMs=\(durationMs)",
+                              category: "danmaku", level: .info)
         danmakuOverlay.bind(player: playerLayerView.player)
         danmakuOverlay.load(vid: vid, bookId: bookId, durationMs: durationMs)
     }

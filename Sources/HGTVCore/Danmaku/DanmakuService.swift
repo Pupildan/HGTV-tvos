@@ -72,11 +72,19 @@ public actor DanmakuService {
                          bookId: String?,
                          durationMs: Int,
                          onSegment: (@MainActor @Sendable ([DanmakuMessage]) -> Void)?) async -> [DanmakuMessage] {
-        guard !vid.isEmpty else { return [] }
+        DiagnosticsLogger.log("🔍 [弹幕诊断] DanmakuService.fetchAll() 进入 vid=\(vid) bookId=\(bookId ?? "nil") durationMs=\(durationMs)",
+                              category: "danmaku", level: .info)
+        guard !vid.isEmpty else {
+            DiagnosticsLogger.log("🔍 [弹幕诊断] fetchAll() 返回空：vid 为空", category: "danmaku", level: .info)
+            return []
+        }
         if let cached = cache[vid] {
+            DiagnosticsLogger.log("🔍 [弹幕诊断] fetchAll() 返回缓存：\(cached.count) 条", category: "danmaku", level: .info)
             if let onSegment, !cached.isEmpty { await MainActor.run { onSegment(cached) } }
             return cached
         }
+        DiagnosticsLogger.log("🔍 [弹幕诊断] fetchAll() 开始获取：duration=\(durationMs > 0 ? durationMs : Self.fallbackDurationMs)ms",
+                              category: "danmaku", level: .info)
 
         let duration = durationMs > 0 ? durationMs : Self.fallbackDurationMs
         var merged: [DanmakuMessage] = []
@@ -138,7 +146,7 @@ public actor DanmakuService {
             try? await Task.sleep(nanoseconds: 400_000_000)
         }
 
-        DiagnosticsLogger.log("弹幕取回完成 vid=\(vid) 窗口数=\(duration / Self.windowMs + 1) 条数=\(merged.count)",
+        DiagnosticsLogger.log("🔍 [弹幕诊断] fetchAll() 完成 vid=\(vid) 窗口数=\(duration / Self.windowMs + 1) 条数=\(merged.count) 失败窗口=\(failedWindows.count)",
                               category: "danmaku", level: .info)
         cache[vid] = merged
         return merged

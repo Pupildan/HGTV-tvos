@@ -157,16 +157,25 @@ final class DanmakuOverlay: UIView {
     /// 换集：清空 + 重取该集弹幕（vid 未变则跳过）。
     /// 分段取回：onSegment 可能乱序追加（失败重试段）——追加后按 offset 重排，发射器用 id 去重扫描。
     func load(vid: String, bookId: String?, durationMs: Int) {
-        guard loadedVid != vid else { return }
+        DiagnosticsLogger.log("🔍 [弹幕诊断] HGTVDanmakuOverlay.load() 进入 vid=\(vid) bookId=\(bookId ?? "nil") durationMs=\(durationMs) loadedVid=\(loadedVid)",
+                              category: "danmaku", level: .info)
+        guard loadedVid != vid else {
+            DiagnosticsLogger.log("🔍 [弹幕诊断] load() 跳过：vid 未变化", category: "danmaku", level: .info)
+            return
+        }
         loadedVid = vid
         items = []
         shotIds = []
         fetchRequested = false
         danmakuView.stop()
         danmakuView.clean()
-        guard !vid.isEmpty, !fetchRequested else { return }
+        guard !vid.isEmpty, !fetchRequested else {
+            DiagnosticsLogger.log("🔍 [弹幕诊断] load() 跳过：vid 为空或已请求", category: "danmaku", level: .info)
+            return
+        }
         fetchRequested = true
-        DiagnosticsLogger.log("DMLOAD vid=\(vid) dur=\(durationMs)", category: "danmaku", level: .debug)
+        DiagnosticsLogger.log("🔍 [弹幕诊断] load() 开始获取弹幕 DMLOAD vid=\(vid) dur=\(durationMs)",
+                              category: "danmaku", level: .info)
         Task { [weak self] in
             let vidCopy = vid
             _ = await DanmakuService.shared.fetchAll(vid: vidCopy, bookId: bookId, durationMs: durationMs) { [weak self] seg in
@@ -174,7 +183,8 @@ final class DanmakuOverlay: UIView {
                 self.appendItems(seg)
             }
             guard let self, self.loadedVid == vidCopy else { return }
-            DiagnosticsLogger.log("DMLOAD done vid=\(vidCopy) total=\(self.items.count)", category: "danmaku", level: .debug)
+            DiagnosticsLogger.log("🔍 [弹幕诊断] load() 完成 DMLOAD done vid=\(vidCopy) total=\(self.items.count)",
+                                  category: "danmaku", level: .info)
         }
     }
 
