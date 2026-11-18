@@ -10,6 +10,8 @@ struct NativePlayerView: UIViewControllerRepresentable {
     let engine: PlaybackEngine
     /// 遥控确认键（中键 .select）→ 呼出底部功能弹窗。
     var onSelectKey: (() -> Void)? = nil
+    /// 底部弹窗是否显示（v26）：显示时让底层 collectionView 退出焦点与交互。
+    var panelActive: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -19,6 +21,7 @@ struct NativePlayerView: UIViewControllerRepresentable {
         let vc = DYPlayerViewController(engine: engine)
         context.coordinator.controller = vc
         vc.onSelectKey = { onSelectKey?() }
+        vc.setPanelActive(panelActive)
         return vc
     }
 
@@ -27,6 +30,8 @@ struct NativePlayerView: UIViewControllerRepresentable {
         vc.syncItemCount()
         // SwiftUI 重建 representable 时刷新回调闭包（捕获的是新副本）
         vc.onSelectKey = { onSelectKey?() }
+        // v26：弹窗显示/隐藏同步到底层控制器（退出/恢复焦点与交互）
+        vc.setPanelActive(panelActive)
     }
 
     final class Coordinator {

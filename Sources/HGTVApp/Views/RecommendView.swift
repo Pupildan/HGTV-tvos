@@ -37,9 +37,10 @@ struct RecommendView: View {
 
             // 全屏分页播放器（底层）
             NativePlayerView(engine: engine,
+                             panelActive: actionPanelVisible,   // v26：弹窗显示时底层让出焦点
                              onSelectKey: {
                                  // 中键呼出弹窗（v25）；返回键交还系统，不再拦。
-                                 // 关闭仍由 ActionPanelView 的 MenuDismiss（返回键）处理。
+                                 // 关闭由 ActionPanelView 的 onExitCommand / 遮罩 / 5s 计时处理。
                                  if !actionPanelVisible {
                                      withAnimation { actionPanelVisible = true }
                                  }

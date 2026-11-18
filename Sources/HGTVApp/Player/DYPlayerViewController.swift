@@ -35,6 +35,25 @@ final class DYPlayerViewController: UIViewController {
         scrollTo(index: 0, animated: false)
     }
 
+    // MARK: - 弹窗焦点让渡（v26）
+    /// 底部弹窗显示期间调用：让 collectionView 退出焦点与交互，
+    /// 使焦点能落到 SwiftUI 弹窗按钮上，并禁用上下滑动/方向键切剧。
+    /// 关闭后务必恢复，否则刷剧交互全断（坑 16 教训）。
+    private var panelActive = false
+    func setPanelActive(_ active: Bool) {
+        guard panelActive != active else { return }
+        panelActive = active
+        collectionView.isUserInteractionEnabled = !active
+        if #available(tvOS 15.0, *) {
+            collectionView.allowsFocus = !active
+        }
+        // 让焦点系统重新计算：退出时从 collectionView 移走，恢复时回到当前 cell
+        view.setNeedsFocusUpdate()
+        view.updateFocusIfNeeded()
+        DiagnosticsLogger.log("弹窗\(active ? "打开" : "关闭")：collectionView 焦点/交互 \(active ? "禁用" : "恢复")",
+                              category: "playback", level: .debug)
+    }
+
     init(engine: PlaybackEngine) {
         self.engine = engine
         super.init(nibName: nil, bundle: nil)

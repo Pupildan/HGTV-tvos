@@ -10,49 +10,15 @@ struct RootTabView: View {
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        // @Environment 注入的 Observable 需先 Bindable 才能用 $ 做双向绑定（SwiftUI 约束）
-        @Bindable var appModel = appModel
-        TabView(selection: $appModel.selectedTab) {
-            RecommendView()
-                .tabItem { Label("推荐", systemImage: "play.rectangle.fill") }
-                .tag(0)
-
-            HomeView()
-                .tabItem { Label("首页", systemImage: "house.fill") }
-                .tag(1)
-
-            // 电影频道（v23 占位）：电影条目走单独的内容通道，功能后期接上
-            MovieView()
-                .tabItem { Label("电影", systemImage: "film.fill") }
-                .tag(2)
-
-            CategoryView()
-                .tabItem { Label("分类", systemImage: "square.grid.2x2.fill") }
-                .tag(3)
-
-            SearchView()
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                .tag(4)
-
-            LibraryView()
-                .tabItem { Label("我的", systemImage: "person.crop.circle.fill") }
-                .tag(5)
-        }
-        .overlay {
-            // 启动引导：设备注册状态（对应原「初始化失败可直接重试」）
-            if case .failed(let msg) = appModel.bootstrapState {
-                BootstrapFailedView(message: msg)
+        // v26：顶部 TabView 功能条已按用户要求直接删除——纯全屏推荐流。
+        // 首页/电影/分类/搜索/我的均为未填充骨架，功能入口统一收敛到底部弹窗。
+        RecommendView()
+            .overlay {
+                // 启动引导：设备注册状态（对应原「初始化失败可直接重试」）
+                if case .failed(let msg) = appModel.bootstrapState {
+                    BootstrapFailedView(message: msg)
+                }
             }
-        }
-        // v24：刷推荐流/播放时彻底隐藏顶部 tab 条（UIKit 层无官方 SwiftUI API）
-        .background(TabBarHider(hidden: appModel.tabBarHidden))
-        // v24：接收「返回推荐」——切回推荐 tab 并恢复导航条
-        .onReceive(NotificationCenter.default.publisher(for: .hgtvReturnToRecommend)) { _ in
-            Task { @MainActor in
-                appModel.selectedTab = 0
-                appModel.tabBarHidden = true
-            }
-        }
     }
 }
 

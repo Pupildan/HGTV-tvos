@@ -360,8 +360,9 @@ struct EpisodePlayerSheet: View {
                 }
             }
         }
-        // v25：中键（.select）呼出弹窗；返回键 .menu 不再拦——交还系统正常返回/关闭浮层。
-        // 弹窗开着时，关闭由 ActionPanelView 内的 MenuDismiss（.menu）负责，二者分工不冲突。
+        // v25：中键（.select）呼出弹窗；返回键 .menu 交还系统正常返回/关闭浮层。
+        // v26：弹窗关闭统一由 ActionPanelView 的 .onExitCommand / 遮罩 / 5s 计时处理，
+        // 并让出焦点给弹窗按钮。
         .background(MenuDismiss(onMenu: {
             if !panelVisible {
                 withAnimation { panelVisible = true }
