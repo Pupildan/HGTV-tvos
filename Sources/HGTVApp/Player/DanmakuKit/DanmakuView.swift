@@ -12,6 +12,7 @@ import AppKit
 import UIKit
 #endif
 
+@MainActor
 public protocol DanmakuViewDelegate: AnyObject {
     
     /// A  danmaku is about to be reused and cellModel is set for you before calling this method.
