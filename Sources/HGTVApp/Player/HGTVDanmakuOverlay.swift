@@ -287,6 +287,7 @@ struct DanmakuOverlayRepresentable: UIViewRepresentable {
     let vid: String
     let bookId: String?
 
+    @MainActor
     func makeUIView(context: Context) -> DanmakuOverlay {
         let v = DanmakuOverlay(frame: .zero)
         v.bind(player: player)
@@ -299,6 +300,7 @@ struct DanmakuOverlayRepresentable: UIViewRepresentable {
         return v
     }
 
+    @MainActor
     func updateUIView(_ v: DanmakuOverlay, context: Context) {
         guard context.coordinator.lastVid != vid else { return }
         context.coordinator.lastVid = vid

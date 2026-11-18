@@ -201,13 +201,14 @@ final class PlayerCell: UICollectionViewCell {
         loadCoverData(from: hiRes, fallback: hiRes == url ? nil : url)
     }
 
+    @MainActor
     private func loadCoverData(from url: URL, fallback: URL?) {
         URLSession.shared.dataTask(with: url) { [weak self] data, resp, _ in
             let ok = (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
             if ok, let data, let image = UIImage(data: data) {
                 Task { @MainActor [weak self] in self?.applyCover(image) }
             } else if let fallback {
-                self?.loadCoverData(from: fallback, fallback: nil)
+                Task { @MainActor [weak self] in self?.loadCoverData(from: fallback, fallback: nil) }
             }
         }.resume()
     }
