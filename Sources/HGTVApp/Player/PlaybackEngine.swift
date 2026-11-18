@@ -86,22 +86,41 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：拉第一批 feed（找剧 tab）。失败可重试（items 仍为空时放行）。
+    /// 首次加载：并发拉取全部 tab 各一批，合并去重后随机洗牌（v28）。
+    /// 原实现每次固定从 tab8 开始、内容池固定 → 用户感觉「每次进入顺序没变化」。
+    /// 改为一次并发拉 8/38/32 三个内容池（实测互不相交），洗牌后首批就有 ~15-20 条，
+    /// 且每次进入的顺序与开头剧集都不同，更接近手机端信息流体验。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            let groups = try await APIService.shared.fetchHome(tabType: feedTabTypes[0])
-            feedTabCursor = 1
-            let added = merge(groups.flatMap { $0.items ?? [] })
+            // 并发拉所有 tab（各一次请求），用 task group 汇总
+            var allItems: [DramaItem] = []
+            let tabSnapshot = feedTabTypes
+            try await withThrowingTaskGroup(of: [DramaItem].self) { group in
+                for tab in tabSnapshot {
+                    group.addTask {
+                        let groups = try await APIService.shared.fetchHome(tabType: tab)
+                        return groups.flatMap { $0.items ?? [] }
+                    }
+                }
+                for try await itemsInTab in group {
+                    allItems.append(contentsOf: itemsInTab)
+                }
+            }
+            // 随机洗牌，打破固定顺序
+            allItems.shuffle()
+            feedTabCursor = Int.random(in: 0..<max(1, tabSnapshot.count))
+            let added = merge(allItems)
             if added.isEmpty {
                 errorMessage = "暂无推荐内容"
                 DiagnosticsLogger.warn("首批 feed 去重后为空", category: "playback")
             } else {
                 hasLoaded = true
                 errorMessage = nil
-                DiagnosticsLogger.log("首批 feed 已加载 \(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
+                DiagnosticsLogger.log("首批 feed(tab并发+洗牌) 已加载 \(added.count) 条，总计 \(items.count)",
+                                      category: "playback", level: .info)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -118,7 +137,9 @@ final class PlaybackEngine {
             let tab = feedTabTypes[feedTabCursor % feedTabTypes.count]
             feedTabCursor += 1
             let groups = try await APIService.shared.fetchHome(tabType: tab)
-            let added = merge(groups.flatMap { $0.items ?? [] })
+            var batch = groups.flatMap { $0.items ?? [] }
+            batch.shuffle()   // v28：每批洗牌，追加顺序也不固定
+            let added = merge(batch)
             DiagnosticsLogger.log("追加 feed(tab=\(tab)) +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
         } catch {
             // 追加失败静默（保留现有流），仅记日志。

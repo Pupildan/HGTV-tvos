@@ -55,21 +55,9 @@ final class DYPlayerViewController: UIViewController {
                               category: "playback", level: .debug)
     }
 
-    /// 确认键（.select）手势识别器。tvOS 上 .select 常被焦点系统消费，
-    /// pressesBegan 的 case .select 时有时收不到，故改用手势识别器（与项目既有 menu 方案一致）。
-    private func installSelectKey() {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(selectPressed))
-        tap.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
-        tap.cancelsTouchesInView = false
-        view.addGestureRecognizer(tap)
-    }
-
-    @objc private func selectPressed() {
-        // 弹窗已显示时焦点在 SwiftUI 按钮上，本识别器不会触发；这里只负责呼出。
-        guard !panelActive else { return }
-        DiagnosticsLogger.log("确认键(.select)手势触发，呼出弹窗", category: "playback", level: .debug)
-        onSelectKey?()
-    }
+    // v28：确认键不再用 pressesBegan / 手势识别器——tvOS 上 .select 被焦点系统
+    // 优先分配给当前聚焦的 cell，这两种都收不到。改由 UICollectionViewDelegate 的
+    // collectionView(_:didSelectItemAtIndexPath:) 处理（聚焦 cell 按中键的标准回调）。
 
     init(engine: PlaybackEngine) {
         self.engine = engine
@@ -86,9 +74,8 @@ final class DYPlayerViewController: UIViewController {
         setupCollectionView()
         wireCallbacks()
         installLoopObserver()
-        // v27：确认键（中键）呼出弹窗改用手势识别器（allowedPressTypes=[.select]）——
-        // tvOS 上 .select 常被焦点系统消费，pressesBegan 收不到；手势识别器是项目验证过的可靠方式。
-        installSelectKey()
+        // v28：确认键由 collectionView(_:didSelectItemAtIndexPath:) 处理（见 extension），
+        // 不再用 pressesBegan / 手势识别器（tvOS .select 被焦点系统消费，二者都收不到）。
 
         Task { [weak self] in
             guard let self else { return }
@@ -325,8 +312,8 @@ final class DYPlayerViewController: UIViewController {
     ///     collection 自动滚动 = 切换不同短剧（v22 之前就在工作的原生机制，勿动）。
     ///   - **左右滑动**：横向没有可聚焦目标 → 焦点引擎放弃该方向 → 方向按键
     ///     **回落到 pressesBegan** → 这里翻译成上一集/下一集。
-    ///   - **中键确认**：v27 改由 installSelectKey 手势识别器呼出底部功能弹窗
-    ///     （pressesBegan 常收不到 .select）。原「中键直接进详情」已取消。
+    ///   - **中键确认**：v28 由 collectionView(_:didSelectItemAtIndexPath:) 呼出弹窗
+    ///     （.select 被焦点系统消费，pressesBegan/手势都收不到）。原「中键直接进详情」已取消。
     ///   - **返回键**：v25 起不再拦截，交还 tvOS 系统做正常返回/关闭浮层。
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
@@ -339,7 +326,7 @@ final class DYPlayerViewController: UIViewController {
                 advance()
                 handled = true
             default:
-                // v27：.select 已改由 installSelectKey 手势识别器处理（pressesBegan 常收不到）
+                // v28：.select 已改由 didSelectItemAtIndexPath 处理（pressesBegan 收不到）
                 break
             }
         }
@@ -399,18 +386,44 @@ extension DYPlayerViewController: UICollectionViewDelegateFlowLayout {
         }
     }
 
+    /// v28：遥控确认键（中键）在 tvOS 上会选中当前聚焦的 cell → 走这里。
+    /// 这是 .select 被焦点系统消费后唯一可靠的接收点。弹窗显示时 cell 已退出焦点，
+    /// 不会触发本回调，故不会与弹窗按钮的点击冲突。
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard !panelActive else { return }
+        DiagnosticsLogger.log("cell 确认键(index=\(indexPath.item))，呼出弹窗", category: "playback", level: .debug)
+        onSelectKey?()
+    }
+
     // MARK: 手动 snap（tvOS 不用 isPagingEnabled）
 
     func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
                                    targetContentOffset: UnsafeMutablePointer<CGPoint>) {
         let pageHeight = view.bounds.height
         guard pageHeight > 0 else { return }
-        let raw = targetContentOffset.pointee.y
-        let snapped: CGFloat = velocity.y >= 0
-            ? ceil(raw / pageHeight)
-            : floor(raw / pageHeight)
         let maxOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
-        let clamped = min(max(0, snapped * pageHeight), maxOffset)
+
+        // v28：降低翻页灵敏度。用「拖拽起点页 → 目标页」的实际跨页距离判断：
+        // 只有位移超过阈值（页高 35%）或速度足够大（快速轻扫）才翻一页；
+        // 轻微滑动一律回弹到当前页，避免碰一下就切剧。
+        let currentPage = max(0, min(engine.index, engine.itemCount - 1))
+        let currentOffset = CGFloat(currentPage) * pageHeight
+        let raw = targetContentOffset.pointee.y
+        let delta = raw - currentOffset
+        let threshold = pageHeight * 0.35
+        let fastSwipe = abs(velocity.y) >= 0.6   // 快速轻扫仍按方向翻页
+
+        var targetPage = currentPage
+        if fastSwipe {
+            targetPage += velocity.y > 0 ? 1 : -1
+        } else if delta >= threshold {
+            targetPage += 1
+        } else if delta <= -threshold {
+            targetPage -= 1
+        }
+        targetPage = max(0, min(targetPage, engine.itemCount - 1))
+        let clamped = min(CGFloat(targetPage) * pageHeight, maxOffset)
         targetContentOffset.pointee.y = clamped
     }
 
