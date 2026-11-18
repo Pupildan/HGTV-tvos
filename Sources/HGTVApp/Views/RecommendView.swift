@@ -30,6 +30,8 @@ struct RecommendView: View {
     @State private var detailDrama: DramaItem?
     /// 底部功能弹窗是否显示（v24：遥控返回键呼出）。
     @State private var actionPanelVisible = false
+    /// v32 弹幕开关态（面板按钮文案联动；实际值持久化在 DanmakuOverlay.globalEnabled）。
+    @State private var danmakuOn = DanmakuOverlay.globalEnabled
 
     var body: some View {
         ZStack {
@@ -92,7 +94,8 @@ struct RecommendView: View {
             if actionPanelVisible {
                 ActionPanelView(
                     onAction: { action in handlePanelAction(action) },
-                    onDismiss: { withAnimation { actionPanelVisible = false } }
+                    onDismiss: { withAnimation { actionPanelVisible = false } },
+                    danmakuOn: danmakuOn
                 )
                 .zIndex(3)
                 .transition(.opacity)
@@ -135,8 +138,13 @@ struct RecommendView: View {
         case .backToRecommend:
             // 返回推荐：重新拉推荐流并回到第 0 条
             Task { await engine.returnToRecommendFeed() }
-        case .comment, .danmaku:
-            break // 占位，ActionPanelView 已禁用交互
+        case .danmaku:
+            // v32 弹幕开关：切全局态（UserDefaults + 跨层通知，所有弹幕层即时生效）
+            DanmakuOverlay.globalEnabled.toggle()
+            danmakuOn = DanmakuOverlay.globalEnabled
+            DiagnosticsLogger.log("弹幕开关 → \(danmakuOn ? "开" : "关")", category: "danmaku", level: .info)
+        case .comment:
+            break // 占位
         }
     }
 

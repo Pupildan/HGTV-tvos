@@ -50,19 +50,18 @@ public struct DanmakuMessage: Sendable, Equatable {
 }
 
 /// 窗口分段编排器（串行、去重、缓存）。
-public final class DanmakuService: @unchecked Sendable {
+public actor DanmakuService {
     public static let shared = DanmakuService()
 
     private let api = APIService.shared
-    private let lock = NSLock()
     private var cache: [String: [DanmakuMessage]] = [:]
 
     /// 单窗口时长（原项目响应 extra.next_query_danmaku_list_time 兜底值 +30000ms）
-    static let windowMs = 30_000
+    nonisolated static let windowMs = 30_000
     /// 窗口间节流
-    static let throttleNanos: UInt64 = 150_000_000
+    nonisolated static let throttleNanos: UInt64 = 150_000_000
     /// durationMs 缺失时的兜底时长（10 分钟，超出部分按时钟自然跳过）
-    static let fallbackDurationMs = 600_000
+    nonisolated static let fallbackDurationMs = 600_000
 
     private init() {}
 
@@ -74,10 +73,7 @@ public final class DanmakuService: @unchecked Sendable {
                          durationMs: Int,
                          onSegment: (@MainActor @Sendable ([DanmakuMessage]) -> Void)?) async -> [DanmakuMessage] {
         guard !vid.isEmpty else { return [] }
-        lock.lock()
-        let cached = cache[vid]
-        lock.unlock()
-        if let cached {
+        if let cached = cache[vid] {
             if let onSegment, !cached.isEmpty { await MainActor.run { onSegment(cached) } }
             return cached
         }
@@ -144,16 +140,12 @@ public final class DanmakuService: @unchecked Sendable {
 
         DiagnosticsLogger.log("弹幕取回完成 vid=\(vid) 窗口数=\(duration / Self.windowMs + 1) 条数=\(merged.count)",
                               category: "danmaku", level: .info)
-        lock.lock()
         cache[vid] = merged
-        lock.unlock()
         return merged
     }
 
     /// 清缓存（内存压力/调试用）。
     public func clearCache() {
-        lock.lock()
         cache.removeAll()
-        lock.unlock()
     }
 }

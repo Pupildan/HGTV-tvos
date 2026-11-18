@@ -379,6 +379,95 @@ public final class APIService: Sendable {
         return URLSession(configuration: cfg)
     }()
 
+    // MARK: - 弹幕（v32，协议照抄反编译原项目 LF0/l0.A 方法）
+
+    /// 弹幕窗口响应。
+    public struct DanmakuWindow {
+        public let items: [DanmakuMessage]
+        public let cursor: String
+        public let hasMore: Bool
+    }
+
+    /// 拉一个弹幕窗口。
+    /// POST /novel/commentapi/comment/list/{vid}/v1/，body 参数与原 APK 逐字段对齐
+    /// （comment_source=601 / server_channel=1000 / group_type=30 / comment_type=20）。
+    /// 弹幕与评论共用评论接口，参数不同：评论是 4/18/4（dex 原文实测值）。
+    public func fetchDanmakuWindow(vid: String, bookId: String?,
+                                   startOffsetMs: Int, durationMs: Int,
+                                   cursor: String) async throws -> DanmakuWindow {
+        var bizParam: [String: Any] = [
+            "start_offset_time": startOffsetMs,
+            "playlet_item_duration": durationMs,
+            "need_danmaku_guide_type": [1, 3, 4, 2],
+        ]
+        if let bookId, !bookId.isEmpty {
+            bizParam["book_id"] = bookId
+        }
+        let payload: [String: Any] = [
+            "comment_source": 601,
+            "server_channel": 1000,
+            "group_id": vid,
+            "group_type": 30,
+            "comment_type": 20,
+            "sort": 1,
+            "business_param": bizParam,
+            "count": 200,
+            "cursor": cursor,
+            "aid": HGTVConfig.aid,
+            "compliance_status": 0,
+        ]
+        let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let target = HTTPTargetImpl(
+            host: HGTVConfig.Host.fqnovel,
+            path: "/novel/commentapi/comment/list/\(vid)/v1/",
+            method: "POST",
+            query: [:],
+            body: body,
+            signed: true,
+            // 原项目 l0.A 原文：commentapi POST 显式置空 x-ss-stub，并带 comment-source/server-channel 头
+            extraHeaders: [
+                "comment-source": "601",
+                "server-channel": "1000",
+                "x-ss-stub": "",
+            ]
+        )
+        let raw = try await http.request(target)
+        return try Self.parseDanmakuWindow(from: raw)
+    }
+
+    /// 解析弹幕窗口响应：data.data_list[]（text/comment_id/offset）+ common_list_info 游标。
+    /// offset 字段按反编译字符串做双 fallback（`offset` 优先，`offset_time` 兜底，均为 ms）。
+    static func parseDanmakuWindow(from data: Data) throws -> DanmakuWindow {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw HTTPError.invalidResponse
+        }
+        let code = obj["code"] as? Int ?? (obj["BaseResp"] as? [String: Any]).flatMap { $0["StatusCode"] as? Int } ?? -1
+        guard code == 0 else {
+            throw HTTPError.catalogHTTP(code)
+        }
+        guard let dataDict = obj["data"] as? [String: Any] else {
+            throw HTTPError.invalidResponse
+        }
+        let list = dataDict["data_list"] as? [[String: Any]] ?? []
+        var items: [DanmakuMessage] = []
+        for e in list {
+            guard let text = e["text"] as? String, !text.isEmpty else { continue }
+            let id = (e["comment_id"] as? String)
+                ?? (e["comment_id"] as? NSNumber).map { $0.stringValue }
+                ?? ""
+            guard !id.isEmpty else { continue }
+            let off = (e["offset"] as? NSNumber)?.doubleValue
+                ?? (e["offset_time"] as? NSNumber)?.doubleValue
+                ?? 0
+            items.append(DanmakuMessage(id: id, offsetMs: off, text: text))
+        }
+        let common = dataDict["common_list_info"] as? [String: Any] ?? [:]
+        let cursor = common["cursor"] as? String ?? ""
+        let hasMore = common["has_more"] as? Bool ?? false
+        return DanmakuWindow(items: items, cursor: cursor, hasMore: hasMore)
+    }
+
     // MARK: - 登录态
     public func isLoggedIn() async -> Bool {
         await DeviceRegisterService.shared.hasSession()

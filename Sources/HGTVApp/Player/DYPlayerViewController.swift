@@ -292,6 +292,10 @@ final class DYPlayerViewController: UIViewController {
         }
         if index == engine.index {
             manager.play(index: index)
+            // v32：池建好即开播 → 弹幕发射器同步进入播放态
+            if let cell = collectionView.cellForItem(at: ip) as? PlayerCell {
+                cell.syncDanmaku(playing: true)
+            }
         }
     }
 
@@ -306,6 +310,13 @@ final class DYPlayerViewController: UIViewController {
             }
             self.engine.noteFirstFrame(index: idx)
         }
+        // v32 弹幕：换集取数（duration 未就绪时传 0 → DanmakuService 用兜底时长分窗）
+        let item = engine.items[index]
+        let durationMs = Int(player.currentItem?.duration.seconds.isFinite == true
+                             ? player.currentItem!.duration.seconds * 1000 : 0)
+        cell.configureDanmaku(vid: engine.vid(at: index) ?? "",
+                              bookId: item.seriesId,
+                              durationMs: max(0, durationMs))
     }
 
     private func dramaAt(_ index: Int) -> DramaItem? {
@@ -324,12 +335,17 @@ final class DYPlayerViewController: UIViewController {
         // 只查池（peekPlayer），不 acquire、不触驱逐 —— 杜绝双 center 打架
         for i in 0..<count {
             guard let player = manager.peekPlayer(at: i) else { continue }
+            let playing = i == clamped && player.currentItem?.status == .readyToPlay
             if i == clamped {
                 if player.currentItem?.status == .readyToPlay {
                     player.play()
                 }
             } else {
                 player.pause()
+            }
+            // v32 弹幕播放态跟随（居中在播才发射）
+            if let cell = collectionView.cellForItem(at: IndexPath(item: i, section: 0)) as? PlayerCell {
+                cell.syncDanmaku(playing: playing)
             }
         }
         DiagnosticsLogger.log("updatePlaybackStates center=\(clamped) vid=\(engine.vid(at: clamped) ?? "?")", category: "playback", level: .info)
@@ -433,6 +449,8 @@ extension DYPlayerViewController: UICollectionViewDelegateFlowLayout {
         if let player = manager.peekPlayer(at: indexPath.item) {
             player.pause()
         }
+        // v32：离屏条目弹幕停发射（防换集旧幕串场）
+        (cell as? PlayerCell)?.syncDanmaku(playing: false)
     }
 
     /// v28：遥控确认键（中键）在 tvOS 上会选中当前聚焦的 cell → 走这里。

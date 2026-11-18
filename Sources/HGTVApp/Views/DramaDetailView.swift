@@ -343,6 +343,8 @@ struct EpisodePlayerSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// v25：遥控中键（.select）呼出底部功能弹窗；返回键交还系统做正常返回/关闭浮层。
     @State private var panelVisible = false
+    /// v32 弹幕开关态（面板按钮文案联动）。
+    @State private var danmakuOn = DanmakuOverlay.globalEnabled
 
     var body: some View {
         ZStack {
@@ -360,6 +362,14 @@ struct EpisodePlayerSheet: View {
                 }
             }
         }
+        // v32：详情页全屏播放弹幕层（渲染方案同推荐流；纯展示层不参与焦点）
+        .overlay {
+            DanmakuOverlayRepresentable(player: viewModel.player,
+                                        vid: vid,
+                                        bookId: nil)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
         // v25：中键（.select）呼出弹窗；返回键 .menu 交还系统正常返回/关闭浮层。
         // v26：弹窗关闭统一由 ActionPanelView 内的 MenuDismiss(.menu) / 遮罩 / 5s 计时处理，
         // 并让出焦点给弹窗按钮。
@@ -373,7 +383,7 @@ struct EpisodePlayerSheet: View {
                 ActionPanelView(
                     onAction: { action in handleAction(action) },
                     onDismiss: { withAnimation { panelVisible = false } },
-                    initialFocus: .episodes
+                    danmakuOn: danmakuOn
                 )
                 .transition(.opacity)
             }
@@ -392,7 +402,11 @@ struct EpisodePlayerSheet: View {
             // 返回推荐：关浮层 + 通知各层收起详情、切回推荐 tab
             dismiss()
             NotificationCenter.default.post(name: .hgtvReturnToRecommend, object: nil)
-        case .comment, .danmaku:
+        case .danmaku:
+            // v32 弹幕开关（全局态，推荐流/详情页共用）
+            DanmakuOverlay.globalEnabled.toggle()
+            danmakuOn = DanmakuOverlay.globalEnabled
+        case .comment:
             break
         }
     }

@@ -1,16 +1,18 @@
 // ActionPanelView.swift
-// 全局底部功能弹窗（v26）。
+// 全局底部功能弹窗（v26；v32 修选中效果/返回键/弹幕开关）。
 // 遥控确认键（中键）呼出，屏幕底部居中液态玻璃面板，横向四个功能按钮：
 // 选集 / 评论 / 弹幕开关 / 返回推荐。
-// 本期接入「选集」「返回推荐」；评论、弹幕开关保留占位但同样可选中（点击暂无动作）。
 //
-// 焦点约定（v26 修正）：
+// 焦点约定：
 //   - 出现时焦点落到首个可用按钮（defaultFocus + onAppear 双保险）；
 //   - .focusSection() 把焦点困在弹窗内，配合宿主让底层 collectionView 退出焦点；
-//   - 返回键用 MenuDismiss 手势识别器关闭（v29：弃用 .onExitCommand——
-//     真机日志证实它在焦点转移时会误触发，导致弹窗打开后 25ms 内被瞬间关闭）；
-//   - 出现后 500ms 内忽略一切 dismiss 请求（冷却窗口，挡住同一次按键的
-//     touch-up 被新遮罩手势误判、以及焦点转移期间的杂散 exit 事件）；
+//   - 返回键关闭用 .onExitCommand（v32 修复：v29 换成的 MenuDismiss 手势识别器
+//     在 SwiftUI overlay 层级里收不到 menu press——识别器视图与焦点按钮不在同一条
+//     responder 链上，按键穿透给系统直接退到桌面）。v29 发现的「打开后 25ms 杂散
+//     exit 误关」由 500ms 冷却窗口（acceptDismiss）挡住，onExitCommand 本身是安全的；
+//     MenuDismiss 保留兜底（两者幂等）。
+//   - 选中效果（v32）：只保留系统圆角矩形焦点框。v31 的自绘白色胶囊与系统效果
+//     双重叠加，按用户要求去掉自绘层（scaleEffect/focusEffectDisabled 一并去掉）。
 //   - 任何焦点移动/点击都重置 5s 无操作计时，到时自动关闭。
 
 import SwiftUI
@@ -38,8 +40,8 @@ struct ActionPanelView: View {
         /// 已接入实功能；占位项仍可选中，只是点击不触发 onAction。
         var implemented: Bool {
             switch self {
-            case .episodes, .backToRecommend: return true
-            case .comment, .danmaku: return false
+            case .episodes, .backToRecommend, .danmaku: return true
+            case .comment: return false
             }
         }
     }
@@ -51,6 +53,8 @@ struct ActionPanelView: View {
     var initialFocus: Action = .episodes
     /// 无操作自动隐藏秒数（默认 5s）。
     var autoHideSeconds: Int = 5
+    /// 弹幕当前开关态（v32：按钮文案联动显示「弹幕开/弹幕关」）。
+    var danmakuOn: Bool = true
 
     @FocusState private var focused: Action?
     /// 每次交互自增，用于重启 idle 计时。
@@ -79,7 +83,10 @@ struct ActionPanelView: View {
                 .padding(.bottom, 80)
             }
         }
-        .background(MenuDismiss { requestDismiss(reason: "返回键") })
+        // v32：返回键关闭主通道。焦点在弹窗按钮上时 menu press 走这里（SwiftUI 官方语义），
+        // v29 观察到的杂散触发已被冷却窗口挡住，不会再瞬间误关。
+        .onExitCommand { requestDismiss(reason: "返回键") }
+        .background(MenuDismiss { requestDismiss(reason: "返回键(手势兜底)") })
         .onAppear {
             focused = initialFocus
             idleTick += 1
@@ -128,23 +135,21 @@ struct ActionPanelView: View {
             VStack(spacing: 8) {
                 Image(systemName: action.symbol)
                     .font(.system(size: 28, weight: .medium))
-                Text(action.rawValue)
+                Text(displayTitle(for: action))
                     .font(.callout.weight(.semibold))
             }
-            // 胶囊贴身包裹内容（不再用大固定框），聚焦时黑字黑图标（同原系统卡片观感）
             .padding(.horizontal, 26)
             .padding(.vertical, 18)
-            .foregroundStyle(focused == action ? Color.black : Color.white.opacity(0.85))
-            .background {
-                Capsule()
-                    .fill(focused == action ? Color.white.opacity(0.92) : Color.white.opacity(0))
-            }
-            // 选中轻微放大动画（弹性）
-            .scaleEffect(focused == action ? 1.06 : 1.0)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: focused == action)
+            .foregroundStyle(Color.white.opacity(0.85))
         }
         .buttonStyle(.plain)
-        .focusEffectDisabled(true)      // 关闭系统默认白色方块选中效果，用上面的自绘胶囊
+        // v32：选中效果只保留系统圆角矩形焦点框（去掉自绘胶囊/放大/字体变色）。
         .focused($focused, equals: action)   // 所有按钮可聚焦可选中
+    }
+
+    /// 弹幕按钮文案联动开关态；其余按钮显示原名。
+    private func displayTitle(for action: Action) -> String {
+        if action == .danmaku { return danmakuOn ? "弹幕开" : "弹幕关" }
+        return action.rawValue
     }
 }

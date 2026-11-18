@@ -53,6 +53,8 @@ final class PlayerCell: UICollectionViewCell {
     static let reuseID = "PlayerCell"
 
     let playerLayerView = PlayerLayerView(frame: .zero)
+    /// v32 弹幕层（Nbeetok 成熟方案移植）：层级 player < danmaku < cover（封面期一并盖住弹幕）
+    let danmakuOverlay = DanmakuOverlay(frame: .zero)
     /// v27 背景：封面高斯模糊铺满，避免小图放大后满屏马赛克
     let coverBlurView = UIImageView(frame: .zero)
     /// v27 前景：清晰封面，保持比例居中（scaleAspectFit），不拉伸失真
@@ -72,6 +74,11 @@ final class PlayerCell: UICollectionViewCell {
         // 底层：视频层
         playerLayerView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(playerLayerView)
+
+        // v32 弹幕层：纯展示、不参与焦点/按键
+        danmakuOverlay.isUserInteractionEnabled = false
+        danmakuOverlay.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(danmakuOverlay)
 
         // v27 背景层：封面高斯模糊铺满（小图放大做背景，模糊反而自然）
         coverBlurView.contentMode = .scaleAspectFill
@@ -102,6 +109,10 @@ final class PlayerCell: UICollectionViewCell {
             playerLayerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             playerLayerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             playerLayerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            danmakuOverlay.topAnchor.constraint(equalTo: contentView.topAnchor),
+            danmakuOverlay.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            danmakuOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            danmakuOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             coverBlurView.topAnchor.constraint(equalTo: contentView.topAnchor),
             coverBlurView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             coverBlurView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -115,7 +126,20 @@ final class PlayerCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
 
-    // MARK: - bind（player 由池分配，cell 只挂 layer）
+    // MARK: - 弹幕（v32，渲染层见 HGTVDanmakuOverlay.swift）
+
+    /// bind 后由控制器调用：挂 player + 换集取弹幕。
+    func configureDanmaku(vid: String, bookId: String?, durationMs: Int) {
+        danmakuOverlay.bind(player: playerLayerView.player)
+        danmakuOverlay.load(vid: vid, bookId: bookId, durationMs: durationMs)
+    }
+
+    /// 播放态同步（居中在播 = true；离屏/暂停 = false）。
+    func syncDanmaku(playing: Bool) {
+        danmakuOverlay.syncPlaying(playing)
+    }
+
+    /// MARK: - bind（player 由池分配，cell 只挂 layer）
 
     /// 绑定池里的 player 到本 cell 的 playerLayerView，并挂首帧观察。
     func bind(index: Int, player: AVPlayer, coverURL: URL?,
@@ -138,6 +162,8 @@ final class PlayerCell: UICollectionViewCell {
         boundIndex = index
         playerLayerView.player = nil
         playerLayerView.isHidden = true
+        danmakuOverlay.bind(player: nil)
+        danmakuOverlay.stopAndClean()   // v32：无播放就停弹幕发射器与定时器
         coverImageView.isHidden = false
         coverBlurView.isHidden = false
         loadCover(coverURL)
@@ -247,6 +273,8 @@ final class PlayerCell: UICollectionViewCell {
         readyObs?.invalidate()
         readyObs = nil
         playerLayerView.player = nil
+        danmakuOverlay.bind(player: nil)
+        danmakuOverlay.stopAndClean()   // v32：复用前清弹幕（防旧集弹幕串场）
         coverImageView.image = nil
         coverImageView.isHidden = false
         coverBlurView.image = nil
