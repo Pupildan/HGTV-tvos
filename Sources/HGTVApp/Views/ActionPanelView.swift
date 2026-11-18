@@ -92,7 +92,7 @@ struct ActionPanelView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 180, minHeight: 120)
+            .frame(width: 180, height: 120)
             .foregroundStyle(action.implemented ? Color.primary : Color.secondary)
         }
         .buttonStyle(.plain)

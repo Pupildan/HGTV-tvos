@@ -10,6 +10,8 @@ struct RootTabView: View {
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
+        // @Environment 注入的 Observable 需先 Bindable 才能用 $ 做双向绑定（SwiftUI 约束）
+        @Bindable var appModel = appModel
         TabView(selection: $appModel.selectedTab) {
             RecommendView()
                 .tabItem { Label("推荐", systemImage: "play.rectangle.fill") }
