@@ -40,6 +40,8 @@ final class PlaybackEngine {
     var onNeedMore: (() -> Void)?
     /// 整表替换（选集进入剧集连播）后触发，控制器据此 reload + 跳转到起始集。
     var onDataReplaced: ((Int) -> Void)?
+    /// 从剧集连播返回推荐流后触发，控制器据此整表 reload 并回到第 0 条。
+    var onFeedRestored: (() -> Void)?
 
     private var seenVids: Set<String> = []
     /// feed 内容池轮换：3 个 tab 实测内容**完全不相交**（tab8 找剧 9 条 / tab38 真人剧
@@ -162,6 +164,35 @@ final class PlaybackEngine {
         DiagnosticsLogger.log("选集进入剧集 series=\(seriesId) 共 \(vids.count) 集，从第 \(target + 1) 集开始",
                               category: "playback", level: .info)
         onDataReplaced?(target)
+    }
+
+    /// 从剧集连播模式返回推荐流（v24 弹窗「返回推荐」入口）。
+    /// 清空剧集列表与去重集合、释放本地代理，重新拉第一批推荐并回到第 0 条。
+    /// 说明：方案默认「重新拉取」；位置恢复（退出前浏览位置）暂不做，后续需要再加。
+    func returnToRecommendFeed() async {
+        // 1) 释放已缓存的明文代理，避免连播剧集的代理残留占用内存
+        for (_, proxy) in proxyCache { proxy.stop() }
+        proxyCache.removeAll()
+        urlCache.removeAll()
+        proxyOrder.removeAll()
+        inflightResolves.removeAll()
+
+        // 2) 清空剧集连播状态，让 load() 的 guard items.isEmpty 放行
+        items = []
+        seenVids = []
+        failedVids = []
+        index = 0
+        firstFrameReady = false
+        hasLoaded = false
+        errorMessage = nil
+
+        // 3) 重新拉推荐流（tab=找剧），复用现有 load()
+        await load()
+
+        // 4) 通知控制器整表 reload + 回到第 0 条
+        onFeedRestored?()
+        DiagnosticsLogger.log("返回推荐流：已重置剧集连播并重新拉取 feed，共 \(items.count) 条",
+                              category: "playback", level: .info)
     }
 
     // MARK: - 居中对齐（唯一真相源）

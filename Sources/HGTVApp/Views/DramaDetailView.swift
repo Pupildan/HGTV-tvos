@@ -1,11 +1,14 @@
 // DramaDetailView.swift
-// 剧集详情 + 选集网格（v22 重写）。
+// 剧集详情 + 选集网格（v24 改版：固定头部 + 100 集动态分页）。
 // 数据源：红果短剧 web /detail?series_id=（HongguoWeb，一次拿全量 vid_list——番茄原
 // video_detail/v1 被风控门控不可用）。
-// 布局参考 PC 端详情页 + tvOS 焦点优化：
-//   - 上方：左侧海报、右侧剧名/标签/热度/简介（PC 端横排结构）
-//   - 下方：全量集数网格（LazyVGrid + focusSection，当前集高亮，遥控焦点驱动）
-//   - 背景：海报大图模糊铺满（自带环境色）+ CIAreaAverage 取主色做氛围渐变
+// 布局（v24）：
+//   - 顶部固定区（约 1/3 高，不随焦点滚动）：左侧海报、右侧剧名/标签/热度/简介。
+//     tvOS 焦点引擎会把聚焦的选集按钮自动滚进可视区，若头部与网格同处一个 ScrollView，
+//     头部会被顶出屏幕——故头部独立、只有选集区滚动。
+//   - 选集区分页：每页固定 100 集，页数由真实集数决定（末页取实际剩余），
+//     分页条胶囊可聚焦、遥控左右翻页；进详情页按「当前在播集」定位到对应页并高亮。
+//   - 背景：海报大图模糊铺满 + CIAreaAverage 取主色做氛围渐变。
 // 交互：点任意集 →
 //   - 播放器内入口（onPickInPlayer）：整表替换 feed 回刷集模式连播（A1 衔接）
 //   - 其他 tab 入口：内置全屏播放浮层（PlayerViewModel 管线 + AVPlayerViewController）
@@ -30,23 +33,42 @@ struct DramaDetailView: View {
     @FocusState private var focusedEpisode: Int?
     @State private var playingVid: VidRef?
 
+    // v24 分页：0-based 页码，每页 100 集；页数由 vidList 真实数量决定。
+    @State private var page: Int = 0
+    private let pageSize = 100
+    @Environment(\.dismiss) private var dismiss
+
     struct VidRef: Identifiable, Equatable {
         let id: String
     }
 
     var body: some View {
-        ZStack {
-            background
-            if let detail {
-                content(detail)
-            } else if let err = loadError {
-                errorView(err)
-            } else {
-                ProgressView("正在加载剧集信息…")
+        GeometryReader { geo in
+            ZStack {
+                background
+                if let detail {
+                    VStack(spacing: 0) {
+                        // 固定头部（约 1/3 高）——不参与选集滚动
+                        header(detail)
+                            .frame(height: geo.size.height / 3)
+                        // 选集区（剩余 2/3）——只有这里滚动
+                        episodeArea(detail)
+                            .frame(maxHeight: .infinity)
+                    }
+                    .padding(.horizontal, 64)
+                } else if let err = loadError {
+                    errorView(err)
+                } else {
+                    ProgressView("正在加载剧集信息…")
+                }
             }
         }
         .background(Color.black)
         .task { await load() }
+        // v24：详情页浮层点「返回推荐」后，本详情页也一并收起（若以 fullScreenCover 呈现）
+        .onReceive(NotificationCenter.default.publisher(for: .hgtvReturnToRecommend)) { _ in
+            Task { @MainActor in dismiss() }
+        }
         .fullScreenCover(item: $playingVid) { ref in
             EpisodePlayerSheet(vid: ref.id)
         }
@@ -74,20 +96,59 @@ struct DramaDetailView: View {
 
     // MARK: - 内容
 
-    private func content(_ d: SeriesDetail) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                HStack(alignment: .top, spacing: 36) {
-                    poster
-                    infoColumn(d)
-                    Spacer(minLength: 0)
-                }
-                Divider().overlay(Color.white.opacity(0.18))
+    /// 固定头部：海报 + 信息，高度由外层约束为约 1/3 屏，不再随焦点滚动。
+    private func header(_ d: SeriesDetail) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 36) {
+                poster
+                infoColumn(d)
+                Spacer(minLength: 0)
+            }
+            Divider().overlay(Color.white.opacity(0.18))
+        }
+        .padding(.top, 24)
+    }
+
+    /// 选集区：分页条 + 当前页网格，独立滚动。
+    private func episodeArea(_ d: SeriesDetail) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            pageBar(d)
+            ScrollView(.vertical) {
                 episodeSection(d)
             }
-            .padding(.horizontal, 64)
-            .padding(.vertical, 40)
         }
+        .padding(.vertical, 12)
+    }
+
+    /// 分页条：按真实集数动态生成页签（每页 100 集，末页为实际剩余）。
+    /// 例：350 集 → 1-100 / 101-200 / 201-300 / 301-350；60 集 → 1-60（单页）。
+    private func pageBar(_ d: SeriesDetail) -> some View {
+        let total = d.vidList.count
+        let pages = max(1, (total + pageSize - 1) / pageSize)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) {
+                ForEach(0..<pages, id: \.self) { p in
+                    let start = p * pageSize + 1
+                    let end = min((p + 1) * pageSize, total)
+                    Button {
+                        page = p
+                    } label: {
+                        Text("\(start)-\(end)")
+                            .font(.callout.bold())
+                            .foregroundStyle(p == page ? .white : .white.opacity(0.75))
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule().fill(p == page ? Color.white.opacity(0.22) : Color.white.opacity(0.09))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("第 \(start) 到 \(end) 集")
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(height: 52)
     }
 
     private var poster: some View {
@@ -102,7 +163,9 @@ struct DramaDetailView: View {
                 Color.white.opacity(0.08).overlay(ProgressView())
             }
         }
-        .frame(width: 300, height: 400)
+        // v24：按固定头部可用高度自适应（3:4），不再用固定 300x400 以免撑出 1/3 区域。
+        .aspectRatio(3/4, contentMode: .fit)
+        .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
     }
@@ -154,22 +217,28 @@ struct DramaDetailView: View {
     }
 
     private func episodeSection(_ d: SeriesDetail) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let total = d.vidList.count
+        let pages = max(1, (total + pageSize - 1) / pageSize)
+        let safePage = min(max(0, page), pages - 1)
+        let start = safePage * pageSize
+        let end = min(start + pageSize, total)
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Text("选集").font(.title2.bold()).foregroundStyle(.white)
-                Text(d.episodeText ?? "共 \(d.vidList.count) 集")
+                Text(d.episodeText ?? "共 \(total) 集")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.6))
                 Spacer()
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 18)], spacing: 18) {
-                ForEach(Array(d.vidList.enumerated()), id: \.offset) { idx, vid in
-                    episodeButton(index: idx, vid: vid, current: d)
+                ForEach(start..<end, id: \.self) { idx in
+                    episodeButton(index: idx, vid: d.vidList[idx], current: d)
                 }
             }
             .focusSection()
         }
+        .padding(.bottom, 24)
     }
 
     private func episodeButton(index idx: Int, vid: String, current: SeriesDetail) -> some View {
@@ -215,9 +284,15 @@ struct DramaDetailView: View {
     private func load() async {
         do {
             let d = try await HongguoWeb.fetchSeriesDetail(seriesId: item.seriesId ?? "")
-            let initialFocus: Int? = currentVid.flatMap { cv in d.vidList.firstIndex(of: cv) }
+            let initialIndex: Int? = currentVid.flatMap { cv in d.vidList.firstIndex(of: cv) }
+            // v24 智能定位：当前在播集落在第几页（每页 100 集），就先打开那一页。
+            if let idx = initialIndex {
+                page = idx / pageSize
+            } else {
+                page = 0
+            }
             detail = d
-            focusedEpisode = initialFocus
+            focusedEpisode = initialIndex
             if let url = d.coverURL, coverImage == nil {
                 let img = try? await Self.fetchImage(url)
                 if let img {
@@ -266,6 +341,8 @@ struct EpisodePlayerSheet: View {
     let vid: String
     @State private var viewModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
+    /// v24：遥控返回键呼出底部功能弹窗
+    @State private var panelVisible = false
 
     var body: some View {
         ZStack {
@@ -283,9 +360,40 @@ struct EpisodePlayerSheet: View {
                 }
             }
         }
-        .background(MenuDismiss { dismiss() })
+        // menu 键：弹窗开着时交给 ActionPanelView 的 MenuDismiss 关闭；
+        // 没开时这里负责呼出（闭包有状态判断，避免双层 recognizer 冲突）。
+        .background(MenuDismiss {
+            if !panelVisible {
+                withAnimation { panelVisible = true }
+            }
+        })
+        .overlay {
+            if panelVisible {
+                ActionPanelView(
+                    onAction: { action in handleAction(action) },
+                    onDismiss: { withAnimation { panelVisible = false } },
+                    initialFocus: .episodes
+                )
+                .transition(.opacity)
+            }
+        }
         .task { await viewModel.play(vid: vid) }
         .onDisappear { viewModel.stop() }
+    }
+
+    private func handleAction(_ action: ActionPanelView.Action) {
+        withAnimation { panelVisible = false }
+        switch action {
+        case .episodes:
+            // 选集：本浮层从详情页弹出，关闭浮层即可回到下面的分页选集网格
+            dismiss()
+        case .backToRecommend:
+            // 返回推荐：关浮层 + 通知各层收起详情、切回推荐 tab
+            dismiss()
+            NotificationCenter.default.post(name: .hgtvReturnToRecommend, object: nil)
+        case .comment, .danmaku:
+            break
+        }
     }
 }
 

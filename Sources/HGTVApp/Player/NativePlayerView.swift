@@ -10,6 +10,8 @@ struct NativePlayerView: UIViewControllerRepresentable {
     let engine: PlaybackEngine
     /// 遥控确认键（中键）→ 进入当前剧详情页。
     var onSelectSeries: ((String) -> Void)? = nil
+    /// 遥控返回键（.menu）→ 呼出/收起底部功能弹窗。
+    var onMenuKey: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -19,6 +21,7 @@ struct NativePlayerView: UIViewControllerRepresentable {
         let vc = DYPlayerViewController(engine: engine)
         context.coordinator.controller = vc
         vc.onSelectSeries = { sid, _ in onSelectSeries?(sid) }
+        vc.onMenuKey = { onMenuKey?() }
         return vc
     }
 
@@ -27,6 +30,7 @@ struct NativePlayerView: UIViewControllerRepresentable {
         vc.syncItemCount()
         // SwiftUI 重建 representable 时刷新回调闭包（捕获的是新副本）
         vc.onSelectSeries = { sid, _ in onSelectSeries?(sid) }
+        vc.onMenuKey = { onMenuKey?() }
     }
 
     final class Coordinator {

@@ -5,6 +5,11 @@
 import SwiftUI
 import HGTVCore
 
+/// 「返回推荐」跨层通知：详情页浮层/详情页发出，根层与推荐页据此收起浮层、切回推荐 tab。
+extension Notification.Name {
+    static let hgtvReturnToRecommend = Notification.Name("hgtvReturnToRecommend")
+}
+
 @main
 struct HGTVApp: App {
     @State private var appModel = AppModel()
@@ -44,6 +49,11 @@ struct HGTVApp: App {
 final class AppModel {
     var bootstrapState: BootstrapState = .idle
     var deviceReady = false
+
+    /// 当前选中的顶层 tab（0=推荐）。供「返回推荐」等功能跨层切换。
+    var selectedTab: Int = 0
+    /// 是否隐藏顶部 TabView 导航条：刷推荐流/播放时为 true（v24）。
+    var tabBarHidden: Bool = false
 
     enum BootstrapState: Equatable {
         case idle, registering, ready, failed(String)

@@ -27,6 +27,14 @@ final class DYPlayerViewController: UIViewController {
 
     /// 按确认键（遥控中键）请求进入当前剧的详情页（v22）。由 SwiftUI 侧注册。
     var onSelectSeries: ((String, String?) -> Void)?
+    /// 遥控返回键（.menu）→ 通知 SwiftUI 呼出/收起底部功能弹窗（v24）。
+    var onMenuKey: (() -> Void)?
+    /// 返回推荐流后整表 reload + 回到第 0 条（v24）。
+    private func handleFeedRestored() {
+        manager.pauseAll()
+        collectionView.reloadData()
+        scrollTo(index: 0, animated: false)
+    }
 
     init(engine: PlaybackEngine) {
         self.engine = engine
@@ -43,6 +51,7 @@ final class DYPlayerViewController: UIViewController {
         setupCollectionView()
         wireCallbacks()
         installLoopObserver()
+        installMenuKey()
 
         Task { [weak self] in
             guard let self else { return }
@@ -121,6 +130,10 @@ final class DYPlayerViewController: UIViewController {
         // 取流失败（电影等无流条目）→ 居中时自动跳到最近可播条目（v23 兜底）
         manager.onAcquireFailed = { [weak self] index in
             self?.handleAcquireFailed(index: index)
+        }
+        // 返回推荐流（v24）：整表 reload + 回到第 0 条
+        engine.onFeedRestored = { [weak self] in
+            self?.handleFeedRestored()
         }
     }
 
@@ -266,6 +279,21 @@ final class DYPlayerViewController: UIViewController {
 
     private func advance() { scrollTo(index: engine.index + 1, animated: true) }
     private func rewind() { scrollTo(index: engine.index - 1, animated: true) }
+
+    /// 安装返回键（Menu）识别器。tvOS 上 menu 按压不走 pressesBegan 的 press.type，
+    /// 必须像项目现有的 MenuDismiss 那样用 UITapGestureRecognizer + allowedPressTypes=[.menu]。
+    /// 该识别器只在焦点位于本控制器（未呼出弹窗）时触发「打开弹窗」；
+    /// 弹窗显示后焦点转移到 SwiftUI 按钮，由 ActionPanelView 的 MenuDismiss 负责关闭，二者互斥。
+    private func installMenuKey() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
+        tap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        tap.cancelsTouchesInView = false
+        view.addGestureRecognizer(tap)
+    }
+
+    @objc private func menuPressed() {
+        onMenuKey?()
+    }
 
     // MARK: - 遥控（v24 修正版）
 

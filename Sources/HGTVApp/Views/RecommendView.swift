@@ -18,6 +18,7 @@ import SwiftUI
 import HGTVCore
 
 struct RecommendView: View {
+    @Environment(AppModel.self) private var appModel
     @State private var engine = PlaybackEngine()
     /// 底部信息条是否可见（换集重置，5 秒后淡出）。
     @State private var infoVisible = true
@@ -27,6 +28,8 @@ struct RecommendView: View {
     @State private var detailSeriesId: String?
     /// 打开详情时的剧信息（选集后回填到连播标题/封面）。
     @State private var detailDrama: DramaItem?
+    /// 底部功能弹窗是否显示（v24：遥控返回键呼出）。
+    @State private var actionPanelVisible = false
 
     var body: some View {
         ZStack {
@@ -37,6 +40,12 @@ struct RecommendView: View {
                              onSelectSeries: { sid in
                                  detailDrama = engine.currentDrama
                                  detailSeriesId = sid
+                             },
+                             onMenuKey: {
+                                 // 仅负责打开；关闭由 ActionPanelView 的 MenuDismiss 处理
+                                 if !actionPanelVisible {
+                                     withAnimation { actionPanelVisible = true }
+                                 }
                              })
                 .ignoresSafeArea()
                 .zIndex(0)
@@ -81,8 +90,55 @@ struct RecommendView: View {
                 infoVisible = false
             }
         }
+        .overlay {
+            if actionPanelVisible {
+                ActionPanelView(
+                    onAction: { action in handlePanelAction(action) },
+                    onDismiss: { withAnimation { actionPanelVisible = false } }
+                )
+                .zIndex(3)
+                .transition(.opacity)
+            }
+        }
+        // v24：刷推荐流/播放时隐藏顶部 tab 条；呼出功能弹窗或离开时恢复，便于切 tab
+        .onAppear { appModel.tabBarHidden = true }
+        .onChange(of: actionPanelVisible) { _, visible in
+            appModel.tabBarHidden = visible ? false : true
+            // 详情页打开时也恢复导航（详情页是 fullScreenCover，tab 条本就不可见）
+            if detailSeriesId != nil { appModel.tabBarHidden = false }
+        }
+        // v24：从推荐流进的详情页，收到「返回推荐」时收起
+        .onReceive(NotificationCenter.default.publisher(for: .hgtvReturnToRecommend)) { _ in
+            Task { @MainActor in
+                detailSeriesId = nil
+                actionPanelVisible = false
+                appModel.tabBarHidden = true
+            }
+        }
         .onDisappear {
+            appModel.tabBarHidden = false
             DiagnosticsLogger.log("RecommendView 消失", category: "playback", level: .info)
+        }
+    }
+
+    // MARK: - 底部弹窗动作（v24）
+
+    private func handlePanelAction(_ action: ActionPanelView.Action) {
+        withAnimation { actionPanelVisible = false }
+        switch action {
+        case .episodes:
+            // 选集：复用中键的详情页路径（拉详情 → 分页选集网格 → 整表替换连播）
+            guard let sid = engine.currentDrama?.seriesId, !sid.isEmpty else {
+                DiagnosticsLogger.warn("弹窗选集：当前剧无 seriesId，忽略")
+                return
+            }
+            detailDrama = engine.currentDrama
+            detailSeriesId = sid
+        case .backToRecommend:
+            // 返回推荐：重新拉推荐流并回到第 0 条
+            Task { await engine.returnToRecommendFeed() }
+        case .comment, .danmaku:
+            break // 占位，ActionPanelView 已禁用交互
         }
     }
 
