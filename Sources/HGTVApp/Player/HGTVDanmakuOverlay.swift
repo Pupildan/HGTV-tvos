@@ -221,7 +221,11 @@ final class DanmakuOverlay: UIView {
 
     private func ensureTimer() {
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.tick() }
+        let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.tick()
+            }
+        }
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
