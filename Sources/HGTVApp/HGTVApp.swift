@@ -6,8 +6,10 @@ import SwiftUI
 import HGTVCore
 
 /// 「返回推荐」跨层通知：详情页浮层/详情页发出，根层与推荐页据此收起浮层、切回推荐 tab。
+/// 「弹幕开关」跨层通知（v32）：功能面板发出，object=NSNumber(bool)，所有弹幕层即时生效。
 extension Notification.Name {
     static let hgtvReturnToRecommend = Notification.Name("hgtvReturnToRecommend")
+    static let hgtvDanmakuToggled = Notification.Name("hgtvDanmakuToggled")
 }
 
 @main

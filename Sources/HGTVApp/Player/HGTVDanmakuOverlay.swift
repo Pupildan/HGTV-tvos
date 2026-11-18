@@ -11,6 +11,7 @@
 //   - 迟到 40s 以上过期不射（防堆积爆屏）；id 去重（seek 回退不重放，同抖音观感）。
 
 import UIKit
+import SwiftUI
 import AVFoundation
 import HGTVCore
 
@@ -272,6 +273,7 @@ final class DanmakuOverlay: UIView {
     }
 }
 
+@MainActor
 extension DanmakuOverlay: DanmakuViewDelegate {
     /// 轨道满被丢弃的弹幕（吞吐不足的直接量化）
     func danmakuView(_ danmakuView: DanmakuView, noSpaceShoot danmaku: DanmakuCellModel) {
