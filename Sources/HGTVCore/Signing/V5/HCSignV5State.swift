@@ -209,7 +209,7 @@ func hcMedusaEnvelope(
         }
     }
     var outer = [UInt8]()
-    for word: Int64 in [5, Int32(bitPattern: 0xca4f4b2d), 0x430d7549, 0x2caeb53f, 0x56cc6d22] {
+    for word: Int64 in [Int64(5), Int64(bitPattern: 0xca4f4b2d), Int64(bitPattern: 0x430d7549), Int64(bitPattern: 0x2caeb53f), Int64(bitPattern: 0x56cc6d22)] {
         outer += hcLe32(Int32(truncatingIfNeeded: timestamp ^ word))
     }
     outer += Array(n[0..<2])
