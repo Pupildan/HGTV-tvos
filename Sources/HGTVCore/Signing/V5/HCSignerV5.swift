@@ -188,7 +188,7 @@ final class HCSignerV5: @unchecked Sendable {
             di.append(sum)
         }
         let initialBase: [Int32] = [0x7aba4fc8, 0x67166507, 0x6403fa00, 0x340f512f,
-                                    984304912, Int32(bitPattern: 3005047866), Int32(bitPattern: 2874125293), 2152413264]
+                                    984304912, Int32(bitPattern: 3005047866), Int32(bitPattern: 2874125293), Int32(bitPattern: 2152413264)]
         let initial = initialBase.map { hcRor($0, count) }
         let chosen = [
             [101, 5, 7, 6, 3, 2, 1, 0, 5, 4, 3],
