@@ -174,7 +174,7 @@ func hcMedusaPB(_ values: [Int32: Any], schema: [HCMedusaDescriptor]) -> [UInt8]
             if d.typ == 10 {
                 let f = v as! Float
                 if f == 0 { continue }
-                x = f.bitPattern
+                x = Int32(bitPattern: f.bitPattern)
             } else {
                 let n = Int32(truncatingIfNeeded: hcMedusaInteger(v))
                 if n == 0 { continue }

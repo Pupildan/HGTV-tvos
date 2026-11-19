@@ -201,7 +201,7 @@ func hcMedusaEnvironment(_ i: HCMedusaIdentity, _ s: HCMedusaSdk, _ t: HCMedusaT
         // Kotlin (fl[n].toLong() and 0xFFFFFFFFL).toString() —— 无符号 32 位十进制
         parts[n] = UInt32(bitPattern: t.process.fl[n]).description
     }
-    parts[9] = UInt32(bitPattern: t.tls).description
+    parts[9] = UInt32(truncatingIfNeeded: t.tls).description
     let fl = parts.joined(separator: "|")
     let dyn = mStr(s, "fa4c0a5bbd8dcedf5ee28719c5bb1df1")
     let tk = hcMedusaTokenValid(i.token)
