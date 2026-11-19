@@ -246,7 +246,9 @@ public class DanmakuAsyncLayer: CALayer {
     }
     
     private lazy var queue: DispatchQueue = {
-        return DanmakuAsyncLayer.pool?.queue ?? DispatchQueue(label: "com.DanmakuKit.DanmakuAsynclayer")
+        // pool 是 @MainActor 静态；CALayer 子类本身主线程绑定，assumeIsolated 安全
+        let pooled = MainActor.assumeIsolated { DanmakuAsyncLayer.pool?.queue }
+        return pooled ?? DispatchQueue(label: "com.DanmakuKit.DanmakuAsynclayer")
     }()
     
 }
