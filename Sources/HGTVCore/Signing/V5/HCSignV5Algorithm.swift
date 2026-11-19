@@ -243,9 +243,9 @@ private func hcMedusaMix32(_ input: [UInt8], timestamp: Int32, profile: HCMix32P
     }
     var initial = [Int32](repeating: 0, count: 8)
     // Kotlin Integer.rotateLeft(v, -rotation) = 右转 rotation&31
-    for i in 0..<8 { initial[i] = hcMedusaMix32Initial[i].rotateRight(rotation & 31) }
+    for i in 0..<8 { initial[i] = kror32(hcMedusaMix32Initial[i], rotation & 31) }
     var constants = [Int32](repeating: 0, count: 64)
-    for i in 0..<64 { constants[i] = hcMedusaMix32Constants[i].rotateRight((rotation &+ 1) & 31) }
+    for i in 0..<64 { constants[i] = kror32(hcMedusaMix32Constants[i], (rotation &+ 1) & 31) }
     var state = initial
     let lanes = profile.lanes
     for round in profile.roundOffset..<(profile.roundOffset &+ profile.rounds) {
@@ -290,9 +290,9 @@ private func hcMedusaCompressWord32(_ state: [Int32], _ block: [UInt8], _ consta
 private func hcMedusaWord32(_ input: [UInt8], timestamp: Int32, profile: HCWord32Profile) -> [UInt8] {
     let rotation = timestamp &+ profile.rotation
     var initial = [Int32](repeating: 0, count: 4)
-    for i in 0..<4 { initial[i] = hcMedusaWord32Initial[i].rotateRight(rotation & 31) }
+    for i in 0..<4 { initial[i] = kror32(hcMedusaWord32Initial[i], rotation & 31) }
     var constants = [Int32](repeating: 0, count: 64)
-    for i in 0..<64 { constants[i] = hcMedusaWord32Constants[i].rotateRight((rotation &+ 1 &+ Int32(i / 16)) & 31) }
+    for i in 0..<64 { constants[i] = kror32(hcMedusaWord32Constants[i], (rotation &+ 1 &+ Int32(i / 16)) & 31) }
     var block = [UInt8](repeating: 0, count: 64)
     for i in 0..<52 { block[i] = input[i] }
     for i in 0..<8 {
@@ -302,7 +302,7 @@ private func hcMedusaWord32(_ input: [UInt8], timestamp: Int32, profile: HCWord3
     let state = hcMedusaCompressWord32(initial, block, constants, profile.permutation)
     var out = [UInt8](repeating: 0, count: 16)
     for i in 0..<4 {
-        let mask = hcMedusaWord32Mask[i].rotateRight((rotation &+ 6) & 31)
+        let mask = kror32(hcMedusaWord32Mask[i], (rotation &+ 6) & 31)
         hcputU32LE(&out, i * 4, state[i] ^ mask)
     }
     return out

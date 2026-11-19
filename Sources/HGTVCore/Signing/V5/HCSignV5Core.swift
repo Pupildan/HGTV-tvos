@@ -20,9 +20,23 @@ import CryptoKit
 @inline(__always) func kToU32(_ v: Int64) -> Int64 { Int64(UInt32(bitPattern: UInt32(truncatingIfNeeded: v))) }
 @inline(__always) func kInv32(_ v: Int32) -> Int32 { ~v }
 @inline(__always) func kInv64(_ v: Int64) -> Int64 { ~v }
-@inline(__always) func krotl32(_ v: Int32, _ n: Int32) -> Int32 { v.rotateLeft(n) }
-@inline(__always) func krotl64(_ v: Int64, _ n: Int64) -> Int64 { v.rotateLeft(n) }
-@inline(__always) func kror64(_ v: Int64, _ n: Int64) -> Int64 { v.rotateRight(n) }
+// Swift stdlib 无 rotate（在 swift-numerics 包里），这里用移位实现（n 取位宽模，支持负数=反向）。
+@inline(__always) func krotl32(_ v: Int32, _ n: Int32) -> Int32 {
+    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    return Int32(bitPattern: (u << k) | (u >> ((32 - k) & 31)))
+}
+@inline(__always) func kror32(_ v: Int32, _ n: Int32) -> Int32 {
+    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    return Int32(bitPattern: (u >> k) | (u << ((32 - k) & 31)))
+}
+@inline(__always) func krotl64(_ v: Int64, _ n: Int64) -> Int64 {
+    let u = UInt64(bitPattern: v); let k = UInt64(n) & 63
+    return Int64(bitPattern: (u << k) | (u >> ((64 - k) & 63)))
+}
+@inline(__always) func kror64(_ v: Int64, _ n: Int64) -> Int64 {
+    let u = UInt64(bitPattern: v); let k = UInt64(n) & 63
+    return Int64(bitPattern: (u >> k) | (u << ((64 - k) & 63)))
+}
 
 // MARK: - Bytes.kt
 
