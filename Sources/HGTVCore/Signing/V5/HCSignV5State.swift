@@ -379,7 +379,8 @@ func hcMedusaDetailed(
 /** TLS 输入值:0xb462c5a0 与 ts 的预抵消量。 */
 private func hcMedusaTlsInput(_ licenseID: String, _ ts: Int64) -> Int64 {
     let crc = hcMedusaCRC64(Array(licenseID.utf8)) ^ (ts & 0xFFFFFFFF)
-    return Int64(0xb462c5a0 ^ (crc.rotateLeft(4) & 0xFFFFFFFF))
+    let rotated = krotl64(crc, 4) & 0xFFFFFFFF
+    return Int64(0xb462c5a0 ^ rotated)
 }
 
 /** 每个 (device_id, device_token) 一份 Medusa 状态,跨请求推进。 */
@@ -431,7 +432,7 @@ final class HCAutonomousState {
             pointerGap: process.pointerGap,
             tokenPointerTLS: process.tokenPointerTLS,
             tokenPointerLP: process.tokenPointerLP,
-            process: processCopy,
+            process: process,
         )
         if let injected = randomFunc?() {
             random = injected
@@ -447,7 +448,7 @@ final class HCAutonomousState {
             bodyMD5: bodyMD5,
             random: random,
         )
-        let result = hcMedusaDetailed(url, identity: identity, device: device, sdk: sdkCopy, thread: thread, o: options)
+        let result = hcMedusaDetailed(url, i: identity, d: device, s: sdkCopy, thread: thread, o: options)
         requestCount += 1
         // Kotlin:process.record8 = processCopy.record8 —— medusaDetailed 里已 |= 256
         process.record8 = result.record8

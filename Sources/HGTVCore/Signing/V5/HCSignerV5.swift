@@ -173,10 +173,10 @@ final class HCSignerV5: @unchecked Sendable {
         let shift = (count &+ 2) & 7
         let padBase: [Int32] = [0xfa, 0x45, 0x61, 0xd7]
         let pad = padBase.map { Int32(truncatingIfNeeded: kshr32($0 | ($0 << 8), shift)) }
-        var data = query
+        var data: [UInt8] = query
         data += (body ?? [])
         data += hcLe32(ts)
-        data += pad
+        data += pad.flatMap { hcLe32($0) }
         data += hcHexToBytes("00000000000001a0")
         var di = stride(from: 0, to: data.count, by: 4).map { hcI32(data, $0) }
         for i in 0..<112 {
