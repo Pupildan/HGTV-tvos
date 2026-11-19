@@ -144,10 +144,10 @@ private func hcMedusaObscure(_ plain: [UInt8], _ digest: [UInt8]) -> [UInt8] {
 /** 返回 (layout, tail)。layout[i] = [offset, bitGroup]。 */
 private func hcMedusaLayout(_ n: Int) -> ([[Int]], Int) {
     if n == 11 {
-        return (0..<8).map { [0, $0] }, 7
+        return ((0..<8).map { [0, $0] }), 7
     }
     if n >= 248 {
-        return (0..<31).map { [$0 * 8, 0] }, 31
+        return ((0..<31).map { [$0 * 8, 0] }), 31
     }
     fatalError("unsupported Medusa inner length")
 }

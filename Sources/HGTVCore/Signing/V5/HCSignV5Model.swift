@@ -4,7 +4,7 @@
 
 import Foundation
 
-structHCMedusaIdentity {
+struct HCMedusaIdentity {
     let aid: String
     let deviceID: String
     let licenseID: String
