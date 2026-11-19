@@ -17,7 +17,10 @@ import CryptoKit
     Int64(bitPattern: UInt64(bitPattern: v) >> UInt64(truncatingIfNeeded: n))
 }
 @inline(__always) func kshrU64(_ v: UInt64, _ n: UInt64) -> UInt64 { v >> n }
-@inline(__always) func kToU32(_ v: Int64) -> Int64 { Int64(UInt32(bitPattern: UInt32(truncatingIfNeeded: v))) }
+@inline(__always) func kToU32(_ v: Int64) -> Int64 {
+    let u = UInt32(truncatingIfNeeded: v)
+    return Int64(u)
+}
 @inline(__always) func kInv32(_ v: Int32) -> Int32 { ~v }
 @inline(__always) func kInv64(_ v: Int64) -> Int64 { ~v }
 // Swift stdlib 无 rotate（在 swift-numerics 包里），这里用移位实现（n 取位宽模，支持负数=反向）。
