@@ -349,7 +349,7 @@ private func hcMedusaBuildTable64(_ profile: HCTable64Profile) -> [[Int64]] {
         for block in stride(from: 0, to: 256, by: 8) {
             for index in 0..<8 {
                 tables[lane][block + index] =
-                    tables[lane-1][block + Int(inverse[index])].rotateRight(Int64(profile.rotation))
+                    kror64(tables[lane-1][block + Int(inverse[index])], Int64(profile.rotation))
             }
         }
     }
@@ -382,7 +382,7 @@ private func hcMedusaTable64(_ input: [UInt8], timestamp: Int32, profile: HCTabl
     var state = [Int64](repeating: Int64(bitPattern: initial), count: 8)
     var constants = [Int64](repeating: 0, count: 10)
     for i in 0..<10 {
-        constants[i] = hcMedusaTable64Constants[i].rotateRight(Int64((rotation &+ 1) & 63))
+        constants[i] = kror64(hcMedusaTable64Constants[i], Int64((rotation &+ 1) & 63))
     }
     var message = [UInt8](repeating: 0, count: 128)
     for i in 0..<52 { message[i] = input[i] }

@@ -273,7 +273,7 @@ func hcApplyFLStages(_ p: inout HCMedusaFLProcess, _ stages: [Int32]) {
         case 5:
             var x = p.fl[4]
             for bit in [Int64(0), Int64(1)] {
-                if (p.record8 & (1 << bit)) != 0 { x = x.rotateLeft(1) }
+                if (p.record8 & (1 << bit)) != 0 { x = krotl32(x, 1) }
             }
             var v: Int32 = 0
             for i in 0..<4 {
@@ -318,7 +318,7 @@ func hcMedusaDetailed(
     var process = thread.process
     process.record8 |= 256
     // Kotlin: rotateLeft(tokenPointerTLS xor crc64(license) xor ts, 4) & 0xFFFFFFFF
-    let tlsMask = (thread.tokenPointerTLS ^ hcMedusaCRC64(Array(i.licenseID.utf8)) ^ (o.timestamp & 0xFFFFFFFF)).rotateLeft(4) & 0xFFFFFFFF
+    let tlsMask = krotl64(thread.tokenPointerTLS ^ hcMedusaCRC64(Array(i.licenseID.utf8)) ^ (o.timestamp & 0xFFFFFFFF), 4) & 0xFFFFFFFF
     var tls = (thread.tls ^ tlsMask) & 0xFFFFFFFF
 
     let stub = o.bodyMD5 ?? ((o.body != nil && o.body!.count > 0) ? hcDigest("MD5", o.body!) : [UInt8](repeating: 0, count: 16))
@@ -448,7 +448,7 @@ final class HCAutonomousState {
             bodyMD5: bodyMD5,
             random: random,
         )
-        let result = hcMedusaDetailed(url, i: identity, d: device, s: sdkCopy, thread: thread, o: options)
+        let result = hcMedusaDetailed(url: url, i: identity, d: device, s: sdkCopy, thread: thread, o: options)
         requestCount += 1
         // Kotlin:process.record8 = processCopy.record8 —— medusaDetailed 里已 |= 256
         process.record8 = result.record8
