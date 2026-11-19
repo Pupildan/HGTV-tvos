@@ -38,6 +38,7 @@ targets:
     platform: tvOS
     sources:
       - Sources/HGTVApp
+      - path: tvOS/Assets.xcassets   # 图标 catalog 单独引用（xcodegen 自动进 Resources build phase，actool 编译）
       - path: tvOS
         type: folder
         buildPhase: none   # Info.plist 单独引用，不当作资源
