@@ -44,13 +44,11 @@ final class PlaybackEngine {
     var onFeedRestored: (() -> Void)?
 
     private var seenVids: Set<String> = []
-    /// feed 内容池轮换：3 个 tab 实测内容**完全不相交**（tab8 找剧 9 条 / tab38 真人剧
-    /// 11 条 / tab32 漫剧 10 条，两两交集全为 0）。bookmall 端点不提供翻页（has_more
-    /// 恒 false），轮换 tab 才有真正多样的无限流。
-    /// v23 起去掉 tab14（电影）：电影条目 multi_video_model 不下发播放地址（报
-    /// 「播放地址已过期」），非短剧内容，用户拍板移除（顶部栏位后续单列电影入口）。
-    private let feedTabTypes: [Int] = [8, 38, 32]
-    private var feedTabCursor = 0
+    /// 推荐流翻页游标（landpage 官方分页接口，根治 bookmall 内容池重复）。
+    /// offset=0/session="" 为首页，后续翻页回传 nextOffset + sessionId。
+    private var feedOffset = 0
+    private var feedSessionId = ""
+    private var feedExhausted = false
     /// 已确认拿不到播放地址的 vid（如电影）。resolve 失败时记录，用于自动跳过。
     private var failedVids: Set<String> = []
 
@@ -86,65 +84,49 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：并发拉取全部 tab 各一批，合并去重后随机洗牌（v28）。
-    /// 原实现每次固定从 tab8 开始、内容池固定 → 用户感觉「每次进入顺序没变化」。
-    /// 改为一次并发拉 8/38/32 三个内容池（实测互不相交），洗牌后首批就有 ~15-20 条，
-    /// 且每次进入的顺序与开头剧集都不同，更接近手机端信息流体验。
+    /// 首次加载：拉首页 landpage（offset=0，limit=100）。
+    /// 官方分页接口：服务端按 session 个性化去重 + offset/limit 切页，根治 bookmall 池重复。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            // 并发拉所有 tab × 2 次（每个 tab 请求 2 次，获得更多内容）
-            // bookmall 无翻页（has_more 恒 false），同一 tab 多次请求返回部分相同内容
-            // 但去重后仍能获得更多新内容（实测每个 tab 两次请求交集 ~3-4 条）
-            var allItems: [DramaItem] = []
-            let tabSnapshot = feedTabTypes
-            let requestCount = tabSnapshot.count * 2   // 6 次请求（3 tab × 2）
-            try await withThrowingTaskGroup(of: [DramaItem].self) { group in
-                for i in 0..<requestCount {
-                    let tab = tabSnapshot[i % tabSnapshot.count]
-                    group.addTask {
-                        let groups = try await APIService.shared.fetchHome(tabType: tab)
-                        return groups.flatMap { $0.items ?? [] }
-                    }
-                }
-                for try await itemsInTab in group {
-                    allItems.append(contentsOf: itemsInTab)
-                }
-            }
-            // 随机洗牌，打破固定顺序
-            allItems.shuffle()
-            feedTabCursor = Int.random(in: 0..<max(1, tabSnapshot.count))
-            let added = merge(allItems)
+            let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+            feedOffset = page.nextOffset
+            feedSessionId = page.sessionId
+            feedExhausted = !page.hasMore
+            // 首页保持服务端个性化排序（不洗牌，尊重 hot_score + 去重）
+            let added = merge(page.items)
             if added.isEmpty {
                 errorMessage = "暂无推荐内容"
-                DiagnosticsLogger.warn("首批 feed 去重后为空", category: "playback")
+                DiagnosticsLogger.warn("首批 feed(landpage) 去重后为空", category: "playback")
             } else {
                 hasLoaded = true
                 errorMessage = nil
-                DiagnosticsLogger.log("首批 feed(tab并发×2+洗牌) 已加载 \(added.count) 条，总计 \(items.count)",
+                DiagnosticsLogger.log("首批 feed(landpage offset=0) 已加载 \(added.count) 条，总计 \(items.count)，session=\(feedSessionId)",
                                       category: "playback", level: .info)
             }
         } catch {
             errorMessage = error.localizedDescription
-            DiagnosticsLogger.error("首批 feed 加载失败: \(error.localizedDescription)", category: "playback")
+            DiagnosticsLogger.error("首批 feed(landpage) 加载失败: \(error.localizedDescription)", category: "playback")
         }
     }
 
-    /// 无限 feed：按 tab 轮换请求（8→38→32→14 循环），按 vid 去重后追加。
+    /// 无限 feed：landpage 翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
     func loadMore() async {
-        guard !isLoadingMore else { return }
+        guard !isLoadingMore, !feedExhausted else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let tab = feedTabTypes[feedTabCursor % feedTabTypes.count]
-            feedTabCursor += 1
-            let groups = try await APIService.shared.fetchHome(tabType: tab)
-            var batch = groups.flatMap { $0.items ?? [] }
-            batch.shuffle()   // v28：每批洗牌，追加顺序也不固定
+            let page = try await APIService.shared.fetchLandpage(offset: feedOffset, sessionId: feedSessionId)
+            feedOffset = page.nextOffset
+            feedSessionId = page.sessionId
+            feedExhausted = !page.hasMore
+            var batch = page.items
+            batch.shuffle()   // 追加批次轻微洗牌（首页不洗，翻页洗以增多样）
             let added = merge(batch)
-            DiagnosticsLogger.log("追加 feed(tab=\(tab)) +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
+            DiagnosticsLogger.log("追加 feed(landpage offset=\(feedOffset)) +\(added.count) 条，总计 \(items.count) hasMore=\(page.hasMore)",
+                                  category: "playback", level: .info)
         } catch {
             // 追加失败静默（保留现有流），仅记日志。
             DiagnosticsLogger.warn("追加 feed 失败: \(error.localizedDescription)", category: "playback")

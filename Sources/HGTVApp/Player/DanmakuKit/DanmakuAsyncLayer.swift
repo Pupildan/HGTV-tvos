@@ -44,7 +44,7 @@ public class DanmakuAsyncLayer: CALayer {
     public var didDisplay: ((_ layer: DanmakuAsyncLayer, _ finished: Bool) -> Void)?
     
     /// The number of queues to draw the danmaku.
-    public static var drawDanmakuQueueCount = 16 {
+    @MainActor public static var drawDanmakuQueueCount = 16 {
         didSet {
             guard drawDanmakuQueueCount != oldValue else { return }
             pool = nil
@@ -53,8 +53,8 @@ public class DanmakuAsyncLayer: CALayer {
     }
     
     private let sentinel = Sentinel()
-    
-    private static var pool: DanmakuQueuePool?
+
+    @MainActor private static var pool: DanmakuQueuePool?
     
     override init() {
         super.init()
@@ -240,7 +240,7 @@ public class DanmakuAsyncLayer: CALayer {
         }
     }
     
-    private static func createPoolIfNeed() {
+    @MainActor private static func createPoolIfNeed() {
         guard DanmakuAsyncLayer.pool == nil else { return }
         DanmakuAsyncLayer.pool = DanmakuQueuePool(name: "com.DanmakuKit.DanmakuAsynclayer", queueCount: DanmakuAsyncLayer.drawDanmakuQueueCount, qos: .userInteractive)
     }

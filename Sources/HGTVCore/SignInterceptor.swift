@@ -37,9 +37,14 @@ public struct AccountCredentials {
 /// 拦截器：输入业务参数 → 输出带签名头的完整请求
 /// 跨 actor 共享（被 Sendable 的 HTTPClient 持有），内部可变凭证由调用方串行化访问。
 public final class SignInterceptor: @unchecked Sendable {
+    /// 内容签名器（V5 = 1.3.7.7 官方 gorgonAligned/0081 + medusa v5 有状态）。
+    /// device_register 仍走旧 RequestSigner（其 body 是 ttEncrypt，签名头由 DeviceRegistrar 单独拼）。
     public let signer: RequestSigner
     public let registrar: DeviceRegistrar
     public var credentials: AccountCredentials
+    /// V5 签名器：内部 medusa 有状态机按 device_id+token 分桶，须跨请求复用同一实例。
+    private let v5: HCSignerV5
+    private let v5Lock = NSLock()
 
     /// X-SS-DP 固定 aid
     public static let xSSDP = "8662"
@@ -54,6 +59,28 @@ public final class SignInterceptor: @unchecked Sendable {
         self.signer = signer
         self.registrar = registrar
         self.credentials = credentials
+        self.v5 = HCSignerV5(device: Self.v5Device(from: credentials))
+    }
+
+    /// 把凭证 + 官方渠道档案组装成 V5 签名器要的 device dict。
+    /// 关键：channel=69310258a（官方渠道，抓包实锤），version_code 默认 74332（视频/landpage 族）。
+    private static func v5Device(from c: AccountCredentials) -> [String: String] {
+        var d = CommonParams.defaults
+        if !c.deviceId.isEmpty { d["device_id"] = c.deviceId }
+        if !c.installId.isEmpty { d["iid"] = c.installId }
+        // 凭证 device 字典可覆盖 rom_version / device_type / device_brand / carrier 等
+        for (k, v) in c.device where !v.isEmpty { d[k] = v }
+        if !c.token.isEmpty { d["device_token"] = c.token }
+        d["channel"] = c.device["channel"] ?? "69310258a"
+        return d
+    }
+
+    /// 凭证更新后同步 V5 签名器的 device dict（medusa 有状态按 did+token 分桶）。
+    public func updateCredentials(_ c: AccountCredentials) {
+        self.credentials = c
+        v5Lock.lock()
+        v5.updateDevice(Self.v5Device(from: c))
+        v5Lock.unlock()
     }
 
     /// 给业务请求加公共头 + 签名。
@@ -62,10 +89,13 @@ public final class SignInterceptor: @unchecked Sendable {
     ///   - params: 业务 query 参数
     ///   - body: POST body；GET 传 nil
     ///   - extraHeaders: 调用方补充头
+    ///   - appFamily: true = 搜索/弹幕/账号族（version 72232 / 7.2.2.32）；
+    ///                false（默认）= 视频/landpage 族（74332 / 7.4.3.32）。抓包分族实锤。
     public func intercept(baseURL: String,
                           params: [String: String],
                           body: [UInt8]?,
-                          extraHeaders: [String: String] = [:]) -> SignedRequest {
+                          extraHeaders: [String: String] = [:],
+                          appFamily: Bool = false) -> SignedRequest {
         // 1) 合并公共 query（device_id / iid 来自凭证）
         var merged = CommonParams.query(
             deviceID: credentials.deviceId.isEmpty ? nil : credentials.deviceId,
@@ -74,37 +104,34 @@ public final class SignInterceptor: @unchecked Sendable {
         )
         for (k, v) in params { merged[k] = v }
 
-        // 2) 签名
-        let context = SignContext(
-            deviceID: credentials.deviceId,
-            deviceToken: registrar.registration?.deviceToken ?? "",
-            installID: credentials.installId,
-            versionCode: merged["version_code"] ?? "74332",
-            versionName: merged["version_name"] ?? "7.4.3.32",
-            osVersion: merged["os_version"] ?? "16",
-            deviceType: merged["device_type"] ?? "25053RT47C",
-            romVersion: credentials.device["rom_version"] ?? "BP2A.250605.031.A3"
-        )
-        var signed = signer.sign(baseURL: baseURL, params: merged, body: body, method: nil)
+        // 2) 补全身份 query（原 app 弹幕/搜索 query 携带全身份，见抓包）
+        if !credentials.token.isEmpty { merged["device_token"] = credentials.token }
+        for key in ["openudid", "cdid", "klink_egdi", "rom", "rom_version",
+                    "carrier", "mcc_mnc", "apk_first_install_time"] {
+            if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
+        }
 
-        // 3) 注入公共头（等价 H0/d）
-        var headers = signed.headers
+        // 3) V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
+        //    appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
+        let deviceOverride = appFamily ? HCVendor5.appDevice : nil
+        v5Lock.lock()
+        let req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
+        v5Lock.unlock()
+
+        // 4) 注入公共头（等价 H0/d；V5 已产出的签名头以拦截器补充为准不覆盖）
+        var headers = req.headers
         for (k, v) in extraHeaders { headers[k] = v }
 
-        // Cookie：凭证 cookie + device_token 相关
+        // Cookie：凭证 cookie
         if credentials.hasCookie {
             headers["Cookie"] = credentials.cookie
         }
-        // X-SS-DP
+        // X-SS-DP（V5 passport 路径已加，这里统一补齐）
         headers["x-ss-dp"] = Self.xSSDP
         // X-Tt-Token（登录后才有）
         if !credentials.token.isEmpty {
             headers["x-tt-token"] = credentials.token
         }
-        // passport-sdk-version（签名里已注入，但拦截器再显式覆盖一次）
-        headers["passport-sdk-version"] = credentials.hasCookie
-            ? Self.passportSDKVersion
-            : Self.anonymousPassportSDKVersion
 
         // X-HGTV-Identity / X-HGTV-Anonymous
         if let identity = credentials.device["hgtv_identity"], !identity.isEmpty {
@@ -115,14 +142,13 @@ public final class SignInterceptor: @unchecked Sendable {
             headers[Self.hgtvAnonymousHeader] = anon
         }
 
-        // x-ss-req-ticket 由 signer 已加；这里再补一个 x-tt-trace-id（可空）
+        // x-tt-trace-id（可空）
         if headers["x-tt-trace-id"] == nil {
             let uuid = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
             headers["x-tt-trace-id"] = "00-\(uuid)-\(uuid.prefix(16))-01"
         }
 
-        signed.headers = headers
-        return signed
+        return SignedRequest(url: req.url, headers: headers, body: req.body, method: req.method)
     }
 }
 

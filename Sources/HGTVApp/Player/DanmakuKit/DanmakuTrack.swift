@@ -16,6 +16,7 @@ let MAX_FLOAT_X = CGFloat.infinity / 2.0
 
 //MARK: DanmakuTrack
 
+@MainActor
 protocol DanmakuTrack {
     
     var positionY: CGFloat { get set }
@@ -244,31 +245,33 @@ class DanmakuFloatingTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
         stop()
     }
     
-    func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
-        guard let danmaku = anim.value(forKey: DANMAKU_CELL_KEY) as? DanmakuCell else { return }
-        danmaku.animationTime += (CFAbsoluteTimeGetCurrent() - danmaku.animationBeginTime) * Double(playingSpeed)
-        if flag {
-            var findCell: DanmakuCell?
-            cells.removeAll { (cell) -> Bool in
-                let flag = cell == danmaku
-                if flag {
-                    findCell = cell
+    nonisolated func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
+        MainActor.assumeIsolated {
+            guard let danmaku = anim.value(forKey: DANMAKU_CELL_KEY) as? DanmakuCell else { return }
+            danmaku.animationTime += (CFAbsoluteTimeGetCurrent() - danmaku.animationBeginTime) * Double(playingSpeed)
+            if flag {
+                var findCell: DanmakuCell?
+                cells.removeAll { (cell) -> Bool in
+                    let flag = cell == danmaku
+                    if flag {
+                        findCell = cell
+                    }
+                    return flag
                 }
-                return flag
-            }
-            if let cell = findCell {
-                #if os(macOS)
-                cell.layer?.removeAllAnimations()
-                cell.layer?.opacity = 0
-                // Avoid invalid geometry warnings on AppKit; do not push to infinity.
-                cell.leaveTrack()
-                stopClosure?(cell)
-                #else
-                cell.layer.removeAllAnimations()
-                cell.frame.origin.x = MAX_FLOAT_X
-                cell.leaveTrack()
-                stopClosure?(cell)
-                #endif
+                if let cell = findCell {
+                    #if os(macOS)
+                    cell.layer?.removeAllAnimations()
+                    cell.layer?.opacity = 0
+                    // Avoid invalid geometry warnings on AppKit; do not push to infinity.
+                    cell.leaveTrack()
+                    stopClosure?(cell)
+                    #else
+                    cell.layer.removeAllAnimations()
+                    cell.frame.origin.x = MAX_FLOAT_X
+                    cell.leaveTrack()
+                    stopClosure?(cell)
+                    #endif
+                }
             }
         }
     }
@@ -448,29 +451,31 @@ class DanmakuVerticalTrack: NSObject, DanmakuTrack, CAAnimationDelegate {
         stop()
     }
     
-    func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
-        guard let danmaku = anim.value(forKey: DANMAKU_CELL_KEY) as? DanmakuCell else { return }
-        danmaku.animationTime += (CFAbsoluteTimeGetCurrent() - danmaku.animationBeginTime) * Double(playingSpeed)
-        if flag {
-            var findCell: DanmakuCell?
-            cells.removeAll { (cell) -> Bool in
-                let flag = cell == danmaku
-                if flag {
-                    findCell = cell
+    nonisolated func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
+        MainActor.assumeIsolated {
+            guard let danmaku = anim.value(forKey: DANMAKU_CELL_KEY) as? DanmakuCell else { return }
+            danmaku.animationTime += (CFAbsoluteTimeGetCurrent() - danmaku.animationBeginTime) * Double(playingSpeed)
+            if flag {
+                var findCell: DanmakuCell?
+                cells.removeAll { (cell) -> Bool in
+                    let flag = cell == danmaku
+                    if flag {
+                        findCell = cell
+                    }
+                    return flag
                 }
-                return flag
-            }
-            if let cell = findCell {
-                #if os(macOS)
-                danmaku.layer?.removeAllAnimations()
-                cell.layer?.opacity = 0
-                danmaku.leaveTrack()
-                stopClosure?(cell)
-                #else
-                danmaku.layer.removeAllAnimations()
-                danmaku.frame.origin.x = MAX_FLOAT_X
-                stopClosure?(cell)
-                #endif
+                if let cell = findCell {
+                    #if os(macOS)
+                    danmaku.layer?.removeAllAnimations()
+                    cell.layer?.opacity = 0
+                    danmaku.leaveTrack()
+                    stopClosure?(cell)
+                    #else
+                    danmaku.layer.removeAllAnimations()
+                    danmaku.frame.origin.x = MAX_FLOAT_X
+                    stopClosure?(cell)
+                    #endif
+                }
             }
         }
     }

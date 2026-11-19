@@ -94,6 +94,81 @@ public final class APIService: Sendable {
         return CategoryLandpage(categoryList: groups)
     }
 
+    // MARK: - 推荐流 landpage（官方分页接口，根治 bookmall 内容池重复）
+    //
+    // 原版推荐流 = POST /reading/distribution/category/landpage/v/（2026-11-20 抓包实锤）。
+    // body：{"filter_ids":"","req_scene":"default","offset":0,"need_selector_panel":true,
+    //        "limit":100,"select_items":{"genre":[],"sort":["hot_score"]},
+    //        "session_id":"","req_type":"default"(首次)/"only_content"(后续),"client_req_type":3}
+    // 真·offset/limit 分页 + session_id 会话态 + 服务端个性化去重（recommend_info 带
+    // request_id/rank/normal_session_id）。bookmall/tab/v 无翻页池 ~50 条 = 重复根因。
+
+    /// 一页 landpage 结果 + 翻页游标。
+    public struct LandpagePage {
+        public let items: [DramaItem]
+        /// 下一页 offset（= 本次 offset + 实际返回条数；服务端按 limit 切）。
+        public let nextOffset: Int
+        /// 会话 id（首页响应下发，后续翻页原样回传）。
+        public let sessionId: String
+        /// 服务端是否还有更多（缺失时按 items 非空推断）。
+        public let hasMore: Bool
+    }
+
+    /// 拉一页推荐流。offset=0/sessionId="" 为首页（req_type=default），后续翻页传上页
+    /// 返回的 offset/sessionId 且 req_type=only_content。
+    public func fetchLandpage(offset: Int, sessionId: String) async throws -> LandpagePage {
+        let isFirst = offset == 0 && sessionId.isEmpty
+        let payload: [String: Any] = [
+            "filter_ids": "",
+            "req_scene": "default",
+            "offset": offset,
+            "need_selector_panel": isFirst,
+            "limit": 100,
+            "select_items": ["genre": [String](), "sort": ["hot_score"]],
+            "session_id": sessionId,
+            "req_type": isFirst ? "default" : "only_content",
+            "client_req_type": 3,
+        ]
+        let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let target = HTTPTargetImpl(
+            host: HGTVConfig.Host.fqnovel,
+            path: HGTVConfig.Path.categoryLandpage,
+            method: "POST",
+            query: [:],
+            body: body,
+            signed: true   // landpage/video 版本族（74332），appFamily 默认 false
+        )
+        let raw = try await http.request(target)
+        return try Self.parseLandpage(from: raw, requestOffset: offset, requestSessionId: sessionId)
+    }
+
+    /// 解析 landpage 响应：递归提取 video_data[]（复用 extractVideos）+ 翻页游标。
+    /// session_id 可能出现在顶层、data 层或 recommend_info（自适应）。
+    static func parseLandpage(from data: Data, requestOffset: Int, requestSessionId: String) throws -> LandpagePage {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw HTTPError.invalidResponse
+        }
+        if let code = obj["code"] as? Int, code != 0 {
+            throw HTTPError.catalogHTTP(code)
+        }
+        let items = extractVideos(from: data)
+        // has_more：优先读 data.has_more / has_more，缺失按 items 非空推断
+        let dataDict = obj["data"] as? [String: Any] ?? [:]
+        let hasMore = (dataDict["has_more"] as? Bool)
+            ?? (obj["has_more"] as? Bool)
+            ?? !items.isEmpty
+        // session_id：data.session_id > 顶层 > recommend_info.normal_session_id > 回传值
+        var sessionId = (dataDict["session_id"] as? String)
+            ?? (obj["session_id"] as? String) ?? ""
+        if sessionId.isEmpty,
+           let ri = dataDict["recommend_info"] as? [String: Any] {
+            sessionId = (ri["normal_session_id"] as? String) ?? (ri["session_id"] as? String) ?? ""
+        }
+        if sessionId.isEmpty { sessionId = requestSessionId }
+        let nextOffset = requestOffset + max(items.count, 0)
+        return LandpagePage(items: items, nextOffset: nextOffset, sessionId: sessionId, hasMore: hasMore)
+    }
+
     public func fetchCategory(genre: String) async throws -> [DramaItem] {
         let groups = try await fetchHome()
         return groups.flatMap { $0.items ?? [] }
@@ -392,27 +467,31 @@ public final class APIService: Sendable {
     /// POST /novel/commentapi/comment/list/{vid}/v1/，body 参数与原 APK 逐字段对齐
     /// （comment_source=601 / server_channel=1000 / group_type=30 / comment_type=20）。
     /// 弹幕与评论共用评论接口，参数不同：评论是 4/18/4（dex 原文实测值）。
+    ///
+    /// 2026-11-20 抓包校正（真机通时 body）：playlet_item_duration 恒为 0（非视频时长）；
+    /// cursor 为服务端状态串（首窗传 ""）；count=200；走 app 版本族（72232）。
     public func fetchDanmakuWindow(vid: String, bookId: String?,
                                    startOffsetMs: Int, durationMs: Int,
                                    cursor: String) async throws -> DanmakuWindow {
         var bizParam: [String: Any] = [
             "start_offset_time": startOffsetMs,
-            "playlet_item_duration": durationMs,
+            // playlet_item_duration 恒 0（抓包实锤，勿传真实时长）
+            "playlet_item_duration": 0,
             "need_danmaku_guide_type": [1, 3, 4, 2],
         ]
         if let bookId, !bookId.isEmpty {
             bizParam["book_id"] = bookId
         }
         let payload: [String: Any] = [
-            "comment_source": 601,
             "server_channel": 1000,
-            "group_id": vid,
-            "group_type": 30,
-            "comment_type": 20,
-            "sort": 1,
-            "business_param": bizParam,
-            "count": 200,
             "cursor": cursor,
+            "business_param": bizParam,
+            "group_id": vid,
+            "comment_type": 20,
+            "count": 200,
+            "comment_source": 601,
+            "group_type": 30,
+            "sort": 1,
             "aid": HGTVConfig.aid,
             "compliance_status": 0,
         ]
@@ -425,6 +504,8 @@ public final class APIService: Sendable {
             query: [:],
             body: body,
             signed: true,
+            // 弹幕/搜索走 app 版本族（72232 / 7.2.2.32）
+            appFamily: true,
             // 原项目 l0.A 原文：commentapi POST 显式置空 x-ss-stub，并带 comment-source/server-channel 头
             extraHeaders: [
                 "comment-source": "601",
