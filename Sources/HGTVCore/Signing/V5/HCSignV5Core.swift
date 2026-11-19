@@ -132,8 +132,14 @@ func hcSm3(_ value: [UInt8]) -> [UInt8] { sm3Hash(value) }   // 复用工程内 
 func hcXor(_ a: [UInt8], _ b: [UInt8]) -> [UInt8] {
     (0..<a.count).map { a[$0] ^ b[$0 % b.count] }
 }
-func hcRol(_ v: Int32, _ n: Int32) -> Int32 { v.rotateLeft(n) }
-func hcRor(_ v: Int32, _ n: Int32) -> Int32 { v.rotateRight(n) }
+func hcRol(_ v: Int32, _ n: Int32) -> Int32 {
+    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    return Int32(bitPattern: (u << k) | (u >> ((32 - k) & 31)))
+}
+func hcRor(_ v: Int32, _ n: Int32) -> Int32 {
+    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    return Int32(bitPattern: (u >> k) | (u << ((32 - k) & 31)))
+}
 
 // MARK: - MedusaPb.kt
 

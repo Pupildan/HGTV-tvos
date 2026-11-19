@@ -237,8 +237,8 @@ private func hcMedusaMix32(_ input: [UInt8], timestamp: Int32, profile: HCMix32P
         let left = message[i-15]
         let right = message[i-2]
         // Kotlin Integer.rotateLeft(left, -7) = Swift rotateLeft(-7) —— Swift 要求 |by|<32 ✓
-        let sigma0 = left.rotateLeft(-7) ^ left.rotateLeft(-18) ^ kshr32(left, 3)
-        let sigma1 = right.rotateLeft(-17) ^ right.rotateLeft(-19) ^ kshr32(right, 10)
+        let sigma0 = krotl32(left, -7) ^ krotl32(left, -18) ^ kshr32(left, 3)
+        let sigma1 = krotl32(right, -17) ^ krotl32(right, -19) ^ kshr32(right, 10)
         message[i] = message[i-16] &+ sigma0 &+ message[i-7] &+ sigma1
     }
     var initial = [Int32](repeating: 0, count: 8)
@@ -255,8 +255,8 @@ private func hcMedusaMix32(_ input: [UInt8], timestamp: Int32, profile: HCMix32P
         let g = state[Int(lanes[6])]; let h = state[Int(lanes[7])]
         let choose = g ^ (e & (f ^ g))
         let majority = ((a | b) & c) | (a & b)
-        let sigma0 = a.rotateLeft(-2) ^ a.rotateLeft(-13) ^ a.rotateLeft(-22)
-        let sigma1 = e.rotateLeft(-6) ^ e.rotateLeft(-11) ^ e.rotateLeft(-25)
+        let sigma0 = krotl32(a, -2) ^ krotl32(a, -13) ^ krotl32(a, -22)
+        let sigma1 = krotl32(e, -6) ^ krotl32(e, -11) ^ krotl32(e, -25)
         let sum1 = h &+ sigma1 &+ choose &+ constants[Int(round & 63)] &+ message[Int(round & 127)]
         let sum2 = sigma0 &+ majority
         var following = [state[7], state[0], state[1], state[2], state[3], state[4], state[5], state[6]]
@@ -280,7 +280,7 @@ private func hcMedusaCompressWord32(_ state: [Int32], _ block: [UInt8], _ consta
         else if round < 48 { mix = b ^ c ^ d }
         else { mix = c ^ (b | ~d) }
         let value = a &+ mix &+ message[Int(hcMedusaWord32Schedule[round])] &+ constants[round]
-        let nextB = b &+ value.rotateLeft(hcMedusaWord32Rotations[round])
+        let nextB = b &+ krotl32(value, hcMedusaWord32Rotations[round])
         let oldB = b; let oldC = c
         a = d; b = nextB; c = oldB; d = oldC
     }
@@ -378,7 +378,9 @@ private func hcMedusaTable64Round(_ words: [Int64], _ tables: [[Int64]]) -> [Int
 private func hcMedusaTable64(_ input: [UInt8], timestamp: Int32, profile: HCTable64Profile) -> [UInt8] {
     let rotation = timestamp &+ profile.rotation
     // Kotlin Long.rotateLeft(v & 0xFFFFFFFF, -rotation) = 右转 rotation&63
-    let initial = (UInt64(bitPattern: Int64(timestamp)) & 0xFFFFFFFF).rotateRight(UInt64(rotation) & 63)
+    let u = (UInt64(bitPattern: Int64(timestamp)) & 0xFFFFFFFF)
+    let k = UInt64(rotation) & 63
+    let initial = Int64(bitPattern: (u >> k) | (u << ((64 - k) & 63)))
     var state = [Int64](repeating: Int64(bitPattern: initial), count: 8)
     var constants = [Int64](repeating: 0, count: 10)
     for i in 0..<10 {
