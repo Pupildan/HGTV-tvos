@@ -347,7 +347,7 @@ func hcMedusaDetailed(
     var v = [Int32: Any]()
     v[1] = hcMedusaRootMagic
     v[2] = Int64(5)
-    v[3] = Int64(rnd[0] & Int32(bitPattern: 0xFFFFFFFF))
+    v[3] = rnd[0] & 0xFFFFFFFF
     v[4] = i.aid
     v[5] = i.deviceID
     v[6] = i.licenseID
@@ -379,7 +379,7 @@ func hcMedusaDetailed(
     let f1: Int64 = Int64(qh[0] & 63) << 46
     let f2: Int64 = Int64(dgst[0] & 63) << 40
     let f3: Int64 = 1 << 32
-    let f4: Int64 = Int64(rnd[2] & Int32(bitPattern: 0xFFFFFFFF))
+    let f4: Int64 = rnd[2] & 0xFFFFFFFF
     let flags: Int64 = f0 | f1 | f2 | f3 | f4
     guard let header = hcMedusaEnvelope(plain, timestamp: o.timestamp, nonce: rnd[1], flags: flags, prefix: prefix, mode: 0, key: hcMedusaDefaultKey) else { return nil }
     return HCMedusaResult(header: header, tls: tls, record8: process.record8, selector: selector, digest: dgst, protobuf: plain)
