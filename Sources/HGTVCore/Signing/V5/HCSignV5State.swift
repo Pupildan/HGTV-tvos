@@ -172,7 +172,7 @@ func hcMedusaEnvelope(
         let m = prefix + hcMedusaObscure(plain, digest)
         // Kotlin be32(medusaAP(n[2..4], 0, 7, 3, 11, 5).toInt()) —— .toInt() 截断
         let mask = hcBe32(Int32(truncatingIfNeeded: hcMedusaAP(Array(n[2..<4]), initial: 0, 7, 3, 11, 5)))
-        mixed = (0..<m.count).map { m[m.count - 1 - it] ^ mask[it % 4] }
+        mixed = (0..<m.count).map { m[m.count - 1 - $0] ^ mask[$0 % 4] }
     }
     var inner: [UInt8] = [UInt8(truncatingIfNeeded: hcMedusaAP(key, initial: 0, 7, 3, 11, 5))]
     inner += f + mixed + Array(n[2..<4])
