@@ -375,19 +375,20 @@ func hcMedusaDetailed(
     v[24] = hcMedusaEnvironment(i, s, HCMedusaThread(tls: tls, firstTPIDR: thread.firstTPIDR, callbackAddress: thread.callbackAddress, pointerGap: thread.pointerGap, tokenPointerTLS: thread.tokenPointerTLS, tokenPointerLP: thread.tokenPointerLP, process: process))
 
     let plain = hcMedusaPB(v, schema: hcMedusaSchema)
-    let flags: Int64 = (3 << 59) |
-        (Int64(qh[0] & 63) << 46) |
-        (Int64(dgst[0] & 63) << 40) |
-        (1 << 32) |
-        Int64(rnd[2] & Int32(bitPattern: 0xFFFFFFFF))
+    let f0: Int64 = 3 << 59
+    let f1: Int64 = Int64(qh[0] & 63) << 46
+    let f2: Int64 = Int64(dgst[0] & 63) << 40
+    let f3: Int64 = 1 << 32
+    let f4: Int64 = Int64(rnd[2] & Int32(bitPattern: 0xFFFFFFFF))
+    let flags: Int64 = f0 | f1 | f2 | f3 | f4
     guard let header = hcMedusaEnvelope(plain, timestamp: o.timestamp, nonce: rnd[1], flags: flags, prefix: prefix, mode: 0, key: hcMedusaDefaultKey) else { return nil }
     return HCMedusaResult(header: header, tls: tls, record8: process.record8, selector: selector, digest: dgst, protobuf: plain)
 }
 
 /** TLS 输入值:Int32(bitPattern: 0xb462c5a0) 与 ts 的预抵消量。 */
 private func hcMedusaTlsInput(_ licenseID: String, _ ts: Int64) -> Int64 {
-    let crc = hcMedusaCRC64(Array(licenseID.utf8)) ^ (ts & Int32(bitPattern: 0xFFFFFFFF))
-    let rotated = krotl64(crc, 4) & Int32(bitPattern: 0xFFFFFFFF)
+    let crc = hcMedusaCRC64(Array(licenseID.utf8)) ^ (ts & 0xFFFFFFFF)
+    let rotated: Int64 = krotl64(crc, 4) & 0xFFFFFFFF
     return Int64(0xb462c5a0 ^ rotated)
 }
 
