@@ -118,7 +118,7 @@ private func hcMedusaSmall(_ data: [UInt8], _ variant: Int, _ key: [UInt8], _ iv
     return out
 }
 
-private func hcMedusaObscure(_ plain: [UInt8], _ digest: [UInt8]) -> [UInt8] {
+private func hcMedusaObscure(_ plain: [UInt8], _ digest: [UInt8]) -> [UInt8]? {
     var a = [UInt8](repeating: 0, count: plain.count)
     for i in 0..<plain.count {
         let k0 = Int(digest[(4 * i) % 32])
@@ -127,7 +127,10 @@ private func hcMedusaObscure(_ plain: [UInt8], _ digest: [UInt8]) -> [UInt8] {
         a[a.count - 1 - i] = UInt8((~(Int(hcRotateLeft8(Int32(x & 0xFF), 3)) &+ k1) & 0xFF) ^ k0)
     }
     let last = a.count - 1
-    precondition(last >= 2, "Medusa protobuf too short")
+    guard last >= 2 else {
+        DiagnosticsLogger.error("V5 medusa: protobuf too short (\(plain.count))", category: "sign")
+        return nil
+    }
     a[0] = a[0] &+ ~(a[last] ^ a[last-1])
     a[1] = a[1] &+ (a[last] ^ a[0] ^ 254)
     for i in 0..<(a.count - 3) {
@@ -141,8 +144,8 @@ private func hcMedusaObscure(_ plain: [UInt8], _ digest: [UInt8]) -> [UInt8] {
     return a
 }
 
-/** 返回 (layout, tail)。layout[i] = [offset, bitGroup]。 */
-private func hcMedusaLayout(_ n: Int) -> ([[Int]], Int) {
+/** 返回 (layout, tail)。layout[i] = [offset, bitGroup]。inner 长度不在支持范围时返回 nil（调用方降级，勿 crash）。 */
+private func hcMedusaLayout(_ n: Int) -> ([[Int]], Int)? {
     if n == 11 {
         let layout = (0..<8).map { [0, $0] }
         return (layout, 7)
@@ -151,7 +154,8 @@ private func hcMedusaLayout(_ n: Int) -> ([[Int]], Int) {
         let layout = (0..<31).map { [$0 * 8, 0] }
         return (layout, 31)
     }
-    fatalError("unsupported Medusa inner length")
+    DiagnosticsLogger.error("V5 medusa: unsupported inner length \(n)", category: "sign")
+    return nil
 }
 
 func hcMedusaEnvelope(
@@ -162,21 +166,25 @@ func hcMedusaEnvelope(
     prefix: [UInt8],
     mode: Int,
     key: [UInt8],
-) -> String {
-    if mode == 1 { fatalError("SDK mode 1 has no supported signature") }
+) -> String? {
+    if mode == 1 {
+        DiagnosticsLogger.error("V5 medusa: SDK mode 1 has no supported signature", category: "sign")
+        return nil
+    }
     let n = hcLe32(Int32(truncatingIfNeeded: nonce))
     let f = hcLe64(flags)
     let digest = hcSm3(key + n + key)
     var mixed = [UInt8]()
     if mode == 0 {
-        let m = prefix + hcMedusaObscure(plain, digest)
-        // Kotlin be32(medusaAP(n[2..4], 0, 7, 3, 11, 5).toInt()) —— .toInt() 截断
+        guard let obscured = hcMedusaObscure(plain, digest) else { return nil }
+        let m = prefix + obscured
+        // Kotlin be32(medusaAP(n[2..4], 0, 7, 3, 11, 5).toInt() —— .toInt() 截断
         let mask = hcBe32(Int32(truncatingIfNeeded: hcMedusaAP(Array(n[2..<4]), initial: 0, 7, 3, 11, 5)))
         mixed = (0..<m.count).map { m[m.count - 1 - $0] ^ mask[$0 % 4] }
     }
     var inner: [UInt8] = [UInt8(truncatingIfNeeded: hcMedusaAP(key, initial: 0, 7, 3, 11, 5))]
     inner += f + mixed + Array(n[2..<4])
-    let (layout, tail) = hcMedusaLayout(inner.count)
+    guard let (layout, tail) = hcMedusaLayout(inner.count) else { return nil }
     var small = [UInt8](repeating: 0, count: 31)
     for i in 0..<layout.count {
         for j in 0..<hcMedusaSelect.count {
@@ -201,7 +209,7 @@ func hcMedusaEnvelope(
         }
     }
     var outer = [UInt8]()
-    for word: Int64 in [5, 0xca4f4b2d, 0x430d7549, 0x2caeb53f, 0x56cc6d22] {
+    for word: Int64 in [5, Int32(bitPattern: 0xca4f4b2d), 0x430d7549, 0x2caeb53f, 0x56cc6d22] {
         outer += hcLe32(Int32(truncatingIfNeeded: timestamp ^ word))
     }
     outer += Array(n[0..<2])
@@ -309,7 +317,7 @@ func hcMedusaDetailed(
     s: HCMedusaSdk,
     thread: HCMedusaThread,
     o: HCMedusaOptions,
-) -> HCMedusaResult {
+) -> HCMedusaResult? {
     let rnd: [Int64] = o.random ?? {
         var b = [UInt8](repeating: 0, count: 12)
         for i in 0..<12 { b[i] = UInt8.random(in: 0...255) }
@@ -318,8 +326,8 @@ func hcMedusaDetailed(
     var process = thread.process
     process.record8 |= 256
     // Kotlin: rotateLeft(tokenPointerTLS xor crc64(license) xor ts, 4) & 0xFFFFFFFF
-    let tlsMask = krotl64(thread.tokenPointerTLS ^ hcMedusaCRC64(Array(i.licenseID.utf8)) ^ (o.timestamp & 0xFFFFFFFF), 4) & 0xFFFFFFFF
-    var tls = (thread.tls ^ tlsMask) & 0xFFFFFFFF
+    let tlsMask = krotl64(thread.tokenPointerTLS ^ hcMedusaCRC64(Array(i.licenseID.utf8)) ^ (o.timestamp & Int32(bitPattern: 0xFFFFFFFF)), 4) & Int32(bitPattern: 0xFFFFFFFF)
+    var tls = (thread.tls ^ tlsMask) & Int32(bitPattern: 0xFFFFFFFF)
 
     let stub = o.bodyMD5 ?? ((o.body != nil && o.body!.count > 0) ? hcDigest("MD5", o.body!) : [UInt8](repeating: 0, count: 16))
     let query = Array(hcMedusaQuery(url).utf8)
@@ -327,19 +335,19 @@ func hcMedusaDetailed(
     var data = [UInt8](repeating: 0, count: 52)
     for k in 0..<32 { data[k] = qh[k] }
     for k in 0..<16 { data[32+k] = stub[k] }
-    data.replaceSubrange(48..<52, with: hcLe32(Int32(truncatingIfNeeded: o.timestamp & 0xFFFFFFFF)))
+    data.replaceSubrange(48..<52, with: hcLe32(Int32(truncatingIfNeeded: o.timestamp & Int32(bitPattern: 0xFFFFFFFF))))
     let selector = Int32(truncatingIfNeeded: hcMedusaAP(data, initial: 0x20230928, 6, 4, 12, 7) & 15)
     let dgst = hcMedusaTail(hcMedusaCore(data, selector: selector, timestamp: o.timestamp), checks: s.requestChecks)
 
     var detection: Int64 = 0
     for n in s.detectionTypes { detection |= (1 << Int64(n & 31)) }
     let prefix = hcLe64(detection)
-    let root17 = Int32(truncatingIfNeeded: o.timestamp & 0xFFFFFFFF)
+    let root17 = Int32(truncatingIfNeeded: o.timestamp & Int32(bitPattern: 0xFFFFFFFF))
 
     var v = [Int32: Any]()
     v[1] = hcMedusaRootMagic
     v[2] = Int64(5)
-    v[3] = Int64(rnd[0] & 0xFFFFFFFF)
+    v[3] = Int64(rnd[0] & Int32(bitPattern: 0xFFFFFFFF))
     v[4] = i.aid
     v[5] = i.deviceID
     v[6] = i.licenseID
@@ -371,15 +379,15 @@ func hcMedusaDetailed(
         (Int64(qh[0] & 63) << 46) |
         (Int64(dgst[0] & 63) << 40) |
         (1 << 32) |
-        Int64(rnd[2] & 0xFFFFFFFF)
-    let header = hcMedusaEnvelope(plain, timestamp: o.timestamp, nonce: rnd[1], flags: flags, prefix: prefix, mode: 0, key: hcMedusaDefaultKey)
+        Int64(rnd[2] & Int32(bitPattern: 0xFFFFFFFF))
+    guard let header = hcMedusaEnvelope(plain, timestamp: o.timestamp, nonce: rnd[1], flags: flags, prefix: prefix, mode: 0, key: hcMedusaDefaultKey) else { return nil }
     return HCMedusaResult(header: header, tls: tls, record8: process.record8, selector: selector, digest: dgst, protobuf: plain)
 }
 
-/** TLS 输入值:0xb462c5a0 与 ts 的预抵消量。 */
+/** TLS 输入值:Int32(bitPattern: 0xb462c5a0) 与 ts 的预抵消量。 */
 private func hcMedusaTlsInput(_ licenseID: String, _ ts: Int64) -> Int64 {
-    let crc = hcMedusaCRC64(Array(licenseID.utf8)) ^ (ts & 0xFFFFFFFF)
-    let rotated = krotl64(crc, 4) & 0xFFFFFFFF
+    let crc = hcMedusaCRC64(Array(licenseID.utf8)) ^ (ts & Int32(bitPattern: 0xFFFFFFFF))
+    let rotated = krotl64(crc, 4) & Int32(bitPattern: 0xFFFFFFFF)
     return Int64(0xb462c5a0 ^ rotated)
 }
 
@@ -414,11 +422,11 @@ final class HCAutonomousState {
         for i in 0..<3 { random[i] = hcReadLe32(b, i * 4) & 0x7fffffff }
     }
 
-    func generate(url: String, body: [UInt8]?, bodyMD5: [UInt8]?, ts: Int64, nowMS: Int64) -> String {
-        generateDetailed(url: url, body: body, bodyMD5: bodyMD5, ts: ts, nowMS: nowMS).header
+    func generate(url: String, body: [UInt8]?, bodyMD5: [UInt8]?, ts: Int64, nowMS: Int64) -> String? {
+        generateDetailed(url: url, body: body, bodyMD5: bodyMD5, ts: ts, nowMS: nowMS)?.header
     }
 
-    func generateDetailed(url: String, body: [UInt8]?, bodyMD5: [UInt8]?, ts: Int64, nowMS: Int64) -> HCMedusaResult {
+    func generateDetailed(url: String, body: [UInt8]?, bodyMD5: [UInt8]?, ts: Int64, nowMS: Int64) -> HCMedusaResult? {
         var integers = sdk.maps.integers
         integers[HCAutonomousState.keyC1] = Int32(truncatingIfNeeded: requestCount)
         var sdkCopy = sdk
@@ -448,7 +456,10 @@ final class HCAutonomousState {
             bodyMD5: bodyMD5,
             random: random,
         )
-        let result = hcMedusaDetailed(url: url, i: identity, d: device, s: sdkCopy, thread: thread, o: options)
+        guard let result = hcMedusaDetailed(url: url, i: identity, d: device, s: sdkCopy, thread: thread, o: options) else {
+            DiagnosticsLogger.error("V5 medusa: detailed generation failed (envelope/layout)", category: "sign")
+            return nil
+        }
         requestCount += 1
         // Kotlin:process.record8 = processCopy.record8 —— medusaDetailed 里已 |= 256
         process.record8 = result.record8

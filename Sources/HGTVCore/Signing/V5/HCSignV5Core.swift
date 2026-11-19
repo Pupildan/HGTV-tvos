@@ -128,7 +128,8 @@ func hcDigest(_ algorithm: String, _ value: [UInt8]) -> [UInt8] {
     case "SHA-512":
         return Array(SHA512.hash(data: Data(value)))
     default:
-        fatalError("unsupported digest \(algorithm)")
+        DiagnosticsLogger.error("V5 hcDigest: unsupported algorithm \(algorithm)", category: "sign")
+        return [UInt8](repeating: 0, count: 16)
     }
 }
 func hcSm3(_ value: [UInt8]) -> [UInt8] { sm3Hash(value) }   // 复用工程内 SM3
@@ -150,7 +151,8 @@ func hcMedusaInteger(_ value: Any?) -> Int64 {
     if let v = value as? Int64 { return v }
     if let v = value as? Int32 { return Int64(v) }
     if let v = value as? Int { return Int64(v) }
-    fatalError("invalid Medusa integer \(String(describing: value))")
+    DiagnosticsLogger.error("V5 medusa: invalid integer \(String(describing: value))", category: "sign")
+    return 0
 }
 
 func hcMedusaVarint(_ out: inout [UInt8], value: Int64) {
@@ -179,8 +181,9 @@ func hcMedusaPB(_ values: [Int32: Any], schema: [HCMedusaDescriptor]) -> [UInt8]
             if n == 0 { continue }
             var x: Int64
             if d.typ == 1 {
-                precondition(n >= Int64(Int32.min) && n <= Int64(Int32.max), "Medusa int32 overflow")
-                let i = Int32(truncatingIfNeeded: n)
+                // clamp 到 int32 范围（勿 precondition crash）
+                let clamped = max(Int64(Int32.min), min(Int64(Int32.max), n))
+                let i = Int32(truncatingIfNeeded: clamped)
                 // (((i shl 1) xor (i shr 31)).toLong()) and 0xFFFFFFFFL —— Kotlin shr 为算术右移
                 let zigzag = UInt32(bitPattern: (i << 1) ^ (i >> 31))
                 x = Int64(zigzag)
@@ -195,7 +198,7 @@ func hcMedusaPB(_ values: [Int32: Any], schema: [HCMedusaDescriptor]) -> [UInt8]
         case 6, 10:
             var x: Int32
             if d.typ == 10 {
-                let f = v as! Float
+                guard let f = v as? Float else { continue }
                 if f == 0 { continue }
                 x = Int32(bitPattern: f.bitPattern)
             } else {
@@ -208,13 +211,15 @@ func hcMedusaPB(_ values: [Int32: Any], schema: [HCMedusaDescriptor]) -> [UInt8]
         default:
             var raw: [UInt8]
             if d.typ == 16 {
-                raw = hcMedusaPB(v as! [Int32: Any], schema: d.fields)
+                guard let nested = v as? [Int32: Any] else { continue }
+                raw = hcMedusaPB(nested, schema: d.fields)
             } else if let b = v as? [UInt8] {
                 raw = b
             } else if let s = v as? String {
                 raw = Array(s.utf8)
             } else {
-                fatalError("invalid Medusa bytes \(type(of: v))")
+                DiagnosticsLogger.error("V5 medusa: invalid bytes type \(type(of: v))", category: "sign")
+                continue
             }
             var data = raw
             if d.typ == 14 {

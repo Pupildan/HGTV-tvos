@@ -162,10 +162,13 @@ final class HCSignerV5: @unchecked Sendable {
         return (check | 4) ^ 0x1000000
     }
 
-    func hashF13(_ query: [UInt8], _ body: [UInt8], _ ts: Int32) -> [UInt8] {
+    func hashF13(_ query: [UInt8], _ body: [UInt8], _ ts: Int32) -> [UInt8]? {
         let ivV = iv(query, body, ts)
         let index = Int((ivV & 15) / 3)
-        precondition((ivV & 15) % 3 == 0, "Unsupported hash branch")
+        guard (ivV & 15) % 3 == 0 else {
+            DiagnosticsLogger.error("V5 hashF13: unsupported hash branch ivV=\(ivV)", category: "sign")
+            return nil
+        }
         let ivV1 = [Int32(bitPattern: 0xc4a78580), Int32(bitPattern: 0xb3c0fd39), Int32(bitPattern: 0xc58c5686),
                     Int32(bitPattern: 0xc9aa3ba7), Int32(bitPattern: 0xf5a7adf2), Int32(bitPattern: 0x963c2ed1)][index]
         let count = ivV1 &+ ts
@@ -314,7 +317,7 @@ final class HCSignerV5: @unchecked Sendable {
         return out
     }
 
-    func medusa(_ url: String, _ body: [UInt8]?, _ ts: Int32, _ d: [String: String]) -> String {
+    func medusa(_ url: String, _ body: [UInt8]?, _ ts: Int32, _ d: [String: String]) -> String? {
         let did = deviceId(d)
         let token = deviceValue(d, "device_token", "")
         let key = "\(did)\u{0000}\(token)"
@@ -330,7 +333,11 @@ final class HCSignerV5: @unchecked Sendable {
             state = fresh
         }
         stateLock.unlock()
-        return state.generate(url: url, body: body, bodyMD5: nil, ts: Int64(UInt32(bitPattern: ts)), nowMS: now)
+        guard let out = state.generate(url: url, body: body, bodyMD5: nil, ts: Int64(UInt32(bitPattern: ts)), nowMS: now) else {
+            DiagnosticsLogger.error("V5 medusa: generate 返回 nil（envelope/layout 降级）", category: "sign")
+            return nil
+        }
+        return out
     }
 
     func helios(_ ts: Int32, licenseId: String = "646637794") -> String {
@@ -372,7 +379,7 @@ final class HCSignerV5: @unchecked Sendable {
     }
 
     func sign(_ base: String, _ values: [String: String], body: [UInt8]? = nil,
-              method: String? = nil, deviceOverride: [String: String]? = nil) -> Request {
+              method: String? = nil, deviceOverride: [String: String]? = nil) -> Request? {
         var d = device
         if let ov = deviceOverride { d.merge(ov) { _, new in new } }
         d = d.filter { !$0.value.isEmpty }
@@ -402,7 +409,7 @@ final class HCSignerV5: @unchecked Sendable {
                 headers["x-argus"] = realArgus(ts)
                 headers["x-gorgon"] = gorgonAligned(query, body, ts, random)
                 headers["x-helios"] = helios(ts)
-                headers["x-medusa"] = medusa(url, body, ts, d)
+                headers["x-medusa"] = medusa(url, body, ts, d) ?? ""
                 headers["x-tt-dt"] = ""
                 if passportPath {
                     headers["x-vc-bdturing-sdk-version"] = "4.0.3.cn"
@@ -421,7 +428,8 @@ final class HCSignerV5: @unchecked Sendable {
                                method: method ?? (body == nil ? "GET" : "POST"))
             }
         }
-        fatalError("无法生成请求签名")
+        DiagnosticsLogger.error("V5 sign: 128 次尝试未找到可用分支，签名失败", category: "sign")
+        return nil
     }
 }
 

@@ -113,10 +113,19 @@ public final class SignInterceptor: @unchecked Sendable {
 
         // 3) V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
         //    appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
+        //    V5 任一环节降级返回 nil 时，回退到旧 XGorgon 签名器，保证 App 不 crash、请求照发。
         let deviceOverride = appFamily ? HCVendor5.appDevice : nil
         v5Lock.lock()
-        let req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
+        let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
         v5Lock.unlock()
+
+        let req: SignedRequest
+        if let v5req {
+            req = SignedRequest(url: v5req.url, headers: v5req.headers, body: v5req.body, method: v5req.method)
+        } else {
+            DiagnosticsLogger.warn("V5 签名降级，回退旧 XGorgon 签名器", category: "sign")
+            req = signer.sign(baseURL: baseURL, params: merged, body: body, method: nil)
+        }
 
         // 4) 注入公共头（等价 H0/d；V5 已产出的签名头以拦截器补充为准不覆盖）
         var headers = req.headers
