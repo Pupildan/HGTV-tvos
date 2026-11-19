@@ -129,7 +129,7 @@ final class HCSignerV5: @unchecked Sendable {
     }
 
     @inline(__always) private func kRand() -> Int32 {
-        Int32(bitPattern: UInt32(random() * 4294967296.0))
+        Int32(bitPattern: UInt32(truncatingIfNeeded: Int64(random() * 4294967296.0)))
     }
 
     private func getIv(_ initial: Int32, _ data: [UInt8]) -> Int32 {
@@ -231,7 +231,7 @@ final class HCSignerV5: @unchecked Sendable {
             j = (j &+ s[i]) & 255
             let y = s[Int(j & 255)]
             s[i] = y
-            out[n] = UInt8(truncatingIfNeeded: Int32(input[n]) ^ s[Int((y &+ y) & 255)])
+            out[n] = UInt8(truncatingIfNeeded: Int32(input[n]) ^ Int32(s[Int((y &+ y) & 255)]))
         }
         for i in 0..<out.count {
             let value = ((Int32(out[i]) >> 4) | (Int32(out[i]) << 4)) & 255
@@ -297,7 +297,7 @@ final class HCSignerV5: @unchecked Sendable {
             varint(x)
         case .float(let f):
             varint(Int64(tag << 3) | 5)
-            out += hcLe32(f.bitPattern)
+            out += hcLe32(Int32(bitPattern: f.bitPattern))
         case .string(let s):
             varint((Int64(tag) << 3) | 2)
             let bytes = Array(s.utf8)
@@ -337,7 +337,7 @@ final class HCSignerV5: @unchecked Sendable {
         for i in 0..<34 {
             var x8 = (kror64(b8, 8) &+ b0) ^ Int64(i)
             words.append(x8)
-            x8 = x8 ^ b0.rotateLeft(61)
+            x8 = x8 ^ krotl64(b0, 61)
             table.append(x8)
             b0 = x8
             b8 = words.removeFirst()
@@ -352,7 +352,7 @@ final class HCSignerV5: @unchecked Sendable {
             var b = hcI64(data, at + 8, little: true)
             for i in 0..<34 {
                 b = table[i] ^ (a &+ kror64(b, 8))
-                a = b ^ a.rotateLeft(61)
+                a = b ^ krotl64(a, 61)
             }
             output += hcLe64(a) + hcLe64(b)
             at += 16
@@ -380,7 +380,7 @@ final class HCSignerV5: @unchecked Sendable {
             let query = HCSignerV5.encode(merged)
             if branch(query, body, ts) == 0 {
                 let url = "\(base)?\(query)"
-                let random = Int32(truncatingIfNeeded: random() * 65536.0)
+                let random = Int32(truncatingIfNeeded: Int64(random() * 65536.0))
                 let passportPath = base.contains("/passport/")
                 var headers = [String: String]()
                 headers["User-Agent"] = HCVendor5.userAgent(d, video: body != nil)
@@ -405,7 +405,7 @@ final class HCSignerV5: @unchecked Sendable {
                 if body != nil {
                     headers["Content-Type"] = "application/json; charset=UTF-8"
                     headers["x-vc-bdturing-sdk-version"] = "4.0.3.cn"
-                    let rid = UInt32(bitPattern: Int32(truncatingIfNeeded: random() * 2_000_000_000.0))
+                    let rid = UInt32(bitPattern: Int32(truncatingIfNeeded: Int64(random() * 2_000_000_000.0)))
                     headers["x-reading-request"] = "\(ticket)-\(rid)"
                     headers["x-ss-stub"] = hcBytesToHex(hcDigest("MD5", body!)).uppercased()
                 }
