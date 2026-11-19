@@ -174,9 +174,9 @@ func hcMedusaContext(_ i: HCMedusaIdentity, _ d: HCMedusaDevice, _ s: HCMedusaSd
     v[14] = i.appVersion
     v[15] = Int64(s.parentProcessID)
     v[17] = p17
-    v[18] = t.firstTPIDR ^ t.callbackAddress ^ (o.timestamp & 0xFFFFFFFF)
-    v[19] = Int32(truncatingIfNeeded: (t.pointerGap ^ (o.timestamp & 0xFFFFFFFF)) & 0xFFFFFFFF)
-    v[20] = t.callbackAddress ^ (o.timestamp & 0xFFFFFFFF)
+    v[18] = t.firstTPIDR ^ t.callbackAddress ^ (o.timestamp & Int64(0xFFFFFFFF))
+    v[19] = Int32(truncatingIfNeeded: (t.pointerGap ^ (o.timestamp & Int64(0xFFFFFFFF))) & Int64(0xFFFFFFFF))
+    v[20] = t.callbackAddress ^ (o.timestamp & Int64(0xFFFFFFFF))
     v[22] = Int64(m.integer("cede084aa3812c79e4614ee74ba582dd"))
     v[23] = Int64(m.integer("30c8cb0fcd3ea4c95cfd5170df341924"))
     if s.devicePresent {

@@ -19,14 +19,14 @@ struct HCDigestChecks {
 
 /** Go medusaAP:带四个移位量的滚动混合。 */
 func hcMedusaAP(_ data: [UInt8], initial: Int64, _ a: Int32, _ b: Int32, _ c: Int32, _ d: Int32) -> Int64 {
-    var h = initial & Int32(bitPattern: 0xFFFFFFFF)
+    var h = initial & Int64(0xFFFFFFFF)
     for i in 0..<data.count {
         let v = Int64(data[i])
         if i & 1 == 0 {
-            h = (h ^ ((h << Int64(a)) & Int32(bitPattern: 0xFFFFFFFF)) ^ v ^ kshr64(h, Int64(b))) & Int32(bitPattern: 0xFFFFFFFF)
+            h = (h ^ ((h << Int64(a)) & Int64(0xFFFFFFFF)) ^ v ^ kshr64(h, Int64(b))) & Int64(0xFFFFFFFF)
         } else {
-            let t = ((h << Int64(c)) & Int32(bitPattern: 0xFFFFFFFF)) | v
-            h = kInv64(t ^ kshr64(h, Int64(d)) ^ h) & Int32(bitPattern: 0xFFFFFFFF)
+            let t = ((h << Int64(c)) & Int64(0xFFFFFFFF)) | v
+            h = kInv64(t ^ kshr64(h, Int64(d)) ^ h) & Int64(0xFFFFFFFF)
         }
     }
     return h
