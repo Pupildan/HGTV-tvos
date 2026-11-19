@@ -171,14 +171,19 @@ final class HCSignerV5: @unchecked Sendable {
         let shift = (count &+ 2) & 7
         let padBase: [Int32] = [0xfa, 0x45, 0x61, 0xd7]
         let pad = padBase.map { Int32(truncatingIfNeeded: kshr32($0 | ($0 << 8), shift)) }
-        var data = query + body + hcLe32(ts) + pad + hcHexToBytes("00000000000001a0")
+        var data = query
+        data += body
+        data += hcLe32(ts)
+        data += pad
+        data += hcHexToBytes("00000000000001a0")
         var di = stride(from: 0, to: data.count, by: 4).map { hcI32(data, $0) }
         for i in 0..<112 {
             let x = di[i + 1]
             let y = di[i + 14]
-            di.append(di[i] &+ di[i + 9]
-                &+ (hcRol(x, 14) ^ hcRol(x, 25) ^ kshr32(x, 3))
-                &+ (hcRol(y, 13) ^ hcRol(y, 15) ^ kshr32(y, 10)))
+            let a1 = hcRol(x, 14) ^ hcRol(x, 25) ^ kshr32(x, 3)
+            let a2 = hcRol(y, 13) ^ hcRol(y, 15) ^ kshr32(y, 10)
+            let sum = di[i] &+ di[i + 9] &+ a1 &+ a2
+            di.append(sum)
         }
         let initialBase: [Int32] = [0x7aba4fc8, 0x67166507, 0x6403fa00, 0x340f512f,
                                     984304912, Int32(bitPattern: 3005047866), Int32(bitPattern: 2874125293), 2152413264]
@@ -218,7 +223,7 @@ final class HCSignerV5: @unchecked Sendable {
         input += hcLe32(67503104)
         input += hcBe32(ts)
         let key: [Int32] = [0x4a, 0x40, 0x16, kshr32(random, 8) & 255, 0x47, 0x6c, 1, random & 255]
-        var s = Array(0...255)
+        var s = [Int32](0...255)
         var j: Int32 = 0
         for i in 0...255 {
             j = (j &+ s[i] &+ key[i % 8]) & 255
@@ -405,7 +410,8 @@ final class HCSignerV5: @unchecked Sendable {
                 if body != nil {
                     headers["Content-Type"] = "application/json; charset=UTF-8"
                     headers["x-vc-bdturing-sdk-version"] = "4.0.3.cn"
-                    let rid = UInt32(bitPattern: Int32(truncatingIfNeeded: Int64(random() * 2_000_000_000.0)))
+                    let ridRaw: Int64 = Int64(random() * 2_000_000_000.0)
+                    let rid = UInt32(bitPattern: Int32(truncatingIfNeeded: ridRaw))
                     headers["x-reading-request"] = "\(ticket)-\(rid)"
                     headers["x-ss-stub"] = hcBytesToHex(hcDigest("MD5", body!)).uppercased()
                 }
