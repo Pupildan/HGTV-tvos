@@ -91,14 +91,16 @@ enum HCVendor5 {
 final class HCSignerV5: @unchecked Sendable {
     private var device: [String: String]
     private let clock: () -> Int64
-    private let random: () -> Double
+    private let rnd: () -> Double
     private let stateLock = NSLock()
     private var medusaStates: [String: HCAutonomousState] = [:]
 
     init(device: [String: String] = [:],
          clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
-         random: @escaping () -> Double = { Double.random(in: 0..<1) }) {
+         rnd: @escaping () -> Double = { Double.random(in: 0..<1) }) {
         self.device = device.filter { !$0.value.isEmpty }
+        self.clock = clock
+        self.rnd = rnd
     }
 
     func updateDevice(_ values: [String: String]) {
@@ -110,7 +112,7 @@ final class HCSignerV5: @unchecked Sendable {
         return fallback
     }
     private func deviceId(_ d: [String: String]) -> String {
-        deviceValue(d, "device_id") { HCVendor5.device["device_id"] ?? "" }
+        deviceValue(d, "device_id", HCVendor5.device["device_id"] ?? "")
     }
     private func deviceType(_ d: [String: String]) -> String { deviceValue(d, "device_type", "25053RT47C") }
     private func deviceBrand(_ d: [String: String]) -> String { deviceValue(d, "device_brand", "Redmi") }
@@ -129,7 +131,7 @@ final class HCSignerV5: @unchecked Sendable {
     }
 
     @inline(__always) private func kRand() -> Int32 {
-        Int32(bitPattern: UInt32(truncatingIfNeeded: Int64(random() * 4294967296.0)))
+        Int32(bitPattern: UInt32(truncatingIfNeeded: Int64(rnd() * 4294967296.0)))
     }
 
     private func getIv(_ initial: Int32, _ data: [UInt8]) -> Int32 {
@@ -172,7 +174,7 @@ final class HCSignerV5: @unchecked Sendable {
         let padBase: [Int32] = [0xfa, 0x45, 0x61, 0xd7]
         let pad = padBase.map { Int32(truncatingIfNeeded: kshr32($0 | ($0 << 8), shift)) }
         var data = query
-        data += body
+        data += (body ?? [])
         data += hcLe32(ts)
         data += pad
         data += hcHexToBytes("00000000000001a0")
@@ -385,7 +387,7 @@ final class HCSignerV5: @unchecked Sendable {
             let query = HCSignerV5.encode(merged)
             if branch(query, body, ts) == 0 {
                 let url = "\(base)?\(query)"
-                let random = Int32(truncatingIfNeeded: Int64(random() * 65536.0))
+                let random = Int32(truncatingIfNeeded: Int64(rnd() * 65536.0))
                 let passportPath = base.contains("/passport/")
                 var headers = [String: String]()
                 headers["User-Agent"] = HCVendor5.userAgent(d, video: body != nil)
@@ -410,7 +412,7 @@ final class HCSignerV5: @unchecked Sendable {
                 if body != nil {
                     headers["Content-Type"] = "application/json; charset=UTF-8"
                     headers["x-vc-bdturing-sdk-version"] = "4.0.3.cn"
-                    let ridRaw: Int64 = Int64(random() * 2_000_000_000.0)
+                    let ridRaw: Int64 = Int64(rnd() * 2_000_000_000.0)
                     let rid = UInt32(bitPattern: Int32(truncatingIfNeeded: ridRaw))
                     headers["x-reading-request"] = "\(ticket)-\(rid)"
                     headers["x-ss-stub"] = hcBytesToHex(hcDigest("MD5", body!)).uppercased()

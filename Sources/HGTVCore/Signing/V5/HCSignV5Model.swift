@@ -67,6 +67,12 @@ struct HCMedusaProcessState {
     var fl: [Int32] = [Int32](repeating: 0, count: 9)
     var record0: Int64 = 0
     var record8: Int64 = 0
+    // 线程/指针上下文（generate() 从 process 读取；默认态由 defaultAutonomousState 填充）
+    var firstTPIDR: Int64 = 0
+    var callbackAddress: Int64 = 0
+    var pointerGap: Int64 = 0
+    var tokenPointerTLS: Int64 = 0
+    var tokenPointerLP: Int64 = 0
 }
 
 struct HCMedusaThread {
