@@ -37,9 +37,8 @@ public struct AccountCredentials {
 /// 拦截器：输入业务参数 → 输出带签名头的完整请求
 /// 跨 actor 共享（被 Sendable 的 HTTPClient 持有），内部可变凭证由调用方串行化访问。
 public final class SignInterceptor: @unchecked Sendable {
-    /// V5 签名总开关。v39/v40 真机秒崩根因在 V5 移植（medusa envelope 等），定位修好前先关掉，
-    /// 全走回退的旧 XGorgon 签名器保命。V5 修好后再置回 true。
-    public static var useV5: Bool = false
+    /// V5 签名总开关。v40 曾关掉 V5 绕开闪退；现打开 V5 + 阶段面包屑日志，真机一崩日志即定位崩点。
+    public static var useV5: Bool = true
     /// 内容签名器（V5 = 1.3.7.7 官方 gorgonAligned/0081 + medusa v5 有状态）。
     /// device_register 仍走旧 RequestSigner（其 body 是 ttEncrypt，签名头由 DeviceRegistrar 单独拼）。
     public let signer: RequestSigner
