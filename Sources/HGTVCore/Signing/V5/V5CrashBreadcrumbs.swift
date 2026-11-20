@@ -6,12 +6,12 @@
 
 import Foundation
 
-enum V5CrashBreadcrumbs {
+public enum V5CrashBreadcrumbs {
     private static let key = "v5.crash.breadcrumbs"
     private static let lock = NSLock()
 
     /// 记录一条面包屑（同步落盘，崩溃安全）。保留最近 60 条。
-    static func mark(_ message: String) {
+    public static func mark(_ message: String) {
         lock.withLock {
             var arr = UserDefaults.standard.stringArray(forKey: key) ?? []
             let ts = String(format: "%.3f", Date().timeIntervalSince1970)
