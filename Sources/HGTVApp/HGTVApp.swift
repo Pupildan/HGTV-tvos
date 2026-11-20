@@ -26,8 +26,15 @@ struct HGTVApp: App {
             await DiagnosticsLogger.shared.registerTransport(TCPTransport())
             await DiagnosticsLogger.shared.start()
 
-            // —— flush 上次崩溃（V5 签名）存下的面包屑：崩溃发生在日志通道建立之前，
-            //    面包屑靠 UserDefaults 存活；这次启动通道就绪，先交出来定位上次崩点。
+            // —— V5 崩溃诊断：崩溃发生在日志通道建立之前，面包屑靠 UserDefaults 存活。
+            //    若检测到上次崩溃的面包屑：本次先关掉 V5（不崩），把面包屑安稳 flush 出来。
+            //    useV5=false 贯穿本次会话（拦截器读这个标志），保证 flush 不被再次崩溃打断。
+            //    下次启动面包屑已被清空 → useV5 恢复 true → 再次复现崩→存新面包屑，交替一次必能发出。
+            let pending = UserDefaults.standard.stringArray(forKey: "v5.crash.breadcrumbs") ?? []
+            if !pending.isEmpty {
+                SignInterceptor.useV5 = false   // 本次会话禁用 V5，安稳 flush 面包屑
+                DiagnosticsLogger.warn("V5 诊断：检测到上次崩溃面包屑 \(pending.count) 条，本次会话禁用 V5 以 flush", category: "sign")
+            }
             V5CrashBreadcrumbs.flushLastCrash()
 
             let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
