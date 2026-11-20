@@ -37,6 +37,9 @@ public struct AccountCredentials {
 /// 拦截器：输入业务参数 → 输出带签名头的完整请求
 /// 跨 actor 共享（被 Sendable 的 HTTPClient 持有），内部可变凭证由调用方串行化访问。
 public final class SignInterceptor: @unchecked Sendable {
+    /// V5 签名总开关。v39/v40 真机秒崩根因在 V5 移植（medusa envelope 等），定位修好前先关掉，
+    /// 全走回退的旧 XGorgon 签名器保命。V5 修好后再置回 true。
+    public static var useV5: Bool = false
     /// 内容签名器（V5 = 1.3.7.7 官方 gorgonAligned/0081 + medusa v5 有状态）。
     /// device_register 仍走旧 RequestSigner（其 body 是 ttEncrypt，签名头由 DeviceRegistrar 单独拼）。
     public let signer: RequestSigner
@@ -111,19 +114,23 @@ public final class SignInterceptor: @unchecked Sendable {
             if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
         }
 
-        // 3) V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
-        //    appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
-        //    V5 任一环节降级返回 nil 时，回退到旧 XGorgon 签名器，保证 App 不 crash、请求照发。
-        let deviceOverride = appFamily ? HCVendor5.appDevice : nil
-        v5Lock.lock()
-        let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
-        v5Lock.unlock()
-
+        // 3) 签名。V5 总开关关闭时直接走旧 XGorgon（v39/v40 秒崩根因在 V5，定位前先短路保命）。
         let req: SignedRequest
-        if let v5req {
-            req = SignedRequest(url: v5req.url, headers: v5req.headers, body: v5req.body, method: v5req.method)
+        if Self.useV5 {
+            // V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
+            // appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
+            // V5 任一环节降级返回 nil 时，回退到旧 XGorgon 签名器，保证 App 不 crash、请求照发。
+            let deviceOverride = appFamily ? HCVendor5.appDevice : nil
+            v5Lock.lock()
+            let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
+            v5Lock.unlock()
+            if let v5req {
+                req = SignedRequest(url: v5req.url, headers: v5req.headers, body: v5req.body, method: v5req.method)
+            } else {
+                DiagnosticsLogger.warn("V5 签名降级，回退旧 XGorgon 签名器", category: "sign")
+                req = signer.sign(baseURL: baseURL, params: merged, body: body, method: nil)
+            }
         } else {
-            DiagnosticsLogger.warn("V5 签名降级，回退旧 XGorgon 签名器", category: "sign")
             req = signer.sign(baseURL: baseURL, params: merged, body: body, method: nil)
         }
 
