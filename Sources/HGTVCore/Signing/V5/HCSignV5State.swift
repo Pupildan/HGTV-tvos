@@ -146,7 +146,7 @@ private func hcMedusaObscure(_ plain: [UInt8], _ digest: [UInt8]) -> [UInt8]? {
 
 /** 返回 (layout, tail)。layout[i] = [offset, bitGroup]。inner 长度不在支持范围时返回 nil（调用方降级，勿 crash）。 */
 private func hcMedusaLayout(_ n: Int) -> ([[Int]], Int)? {
-    V5CrashBreadcrumbs.mark("V5 🧬 layout n=\(n)", category: "sign")
+    V5CrashBreadcrumbs.mark("V5 🧬 layout n=\(n)")
     if n == 11 {
         let layout = (0..<8).map { [0, $0] }
         return (layout, 7)
@@ -172,7 +172,7 @@ func hcMedusaEnvelope(
         DiagnosticsLogger.error("V5 medusa: SDK mode 1 has no supported signature", category: "sign")
         return nil
     }
-    V5CrashBreadcrumbs.mark("V5 🧬 envelope 开始 plainLen=\(plain.count) mode=\(mode)", category: "sign")
+    V5CrashBreadcrumbs.mark("V5 🧬 envelope 开始 plainLen=\(plain.count) mode=\(mode)")
     let n = hcLe32(Int32(truncatingIfNeeded: nonce))
     let f = hcLe64(flags)
     let digest = hcSm3(key + n + key)
@@ -377,7 +377,7 @@ func hcMedusaDetailed(
     v[24] = hcMedusaEnvironment(i, s, HCMedusaThread(tls: tls, firstTPIDR: thread.firstTPIDR, callbackAddress: thread.callbackAddress, pointerGap: thread.pointerGap, tokenPointerTLS: thread.tokenPointerTLS, tokenPointerLP: thread.tokenPointerLP, process: process))
 
     let plain = hcMedusaPB(v, schema: hcMedusaSchema)
-    V5CrashBreadcrumbs.mark("V5 🧬 PB 完成 plainLen=\(plain.count)", category: "sign")
+    V5CrashBreadcrumbs.mark("V5 🧬 PB 完成 plainLen=\(plain.count)")
     let f0: Int64 = 3 << 59
     let f1: Int64 = Int64(qh[0] & 63) << 46
     let f2: Int64 = Int64(dgst[0] & 63) << 40
@@ -388,7 +388,7 @@ func hcMedusaDetailed(
         DiagnosticsLogger.error("V5 🧬 envelope 返回 nil", category: "sign")
         return nil
     }
-    V5CrashBreadcrumbs.mark("V5 🧬 envelope 完成", category: "sign")
+    V5CrashBreadcrumbs.mark("V5 🧬 envelope 完成")
     return HCMedusaResult(header: header, tls: tls, record8: process.record8, selector: selector, digest: dgst, protobuf: plain)
 }
 
