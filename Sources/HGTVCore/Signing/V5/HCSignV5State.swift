@@ -191,7 +191,8 @@ func hcMedusaEnvelope(
     for i in 0..<layout.count {
         for j in 0..<hcMedusaSelect.count {
             let sel = hcMedusaSelect[j]
-            let bit = (inner[layout[i][0] + Int(sel[0])] >> UInt8(Int(sel[1]) + layout[i][1]) & 1) & 1
+            // Kotlin: ushr ((sel[1] + layout[i][1]) and 7) —— 移位量必须 &7，否则 UInt8 移位 ≥8 触发 runtime trap
+            let bit = (inner[layout[i][0] + Int(sel[0])] >> UInt8((Int(sel[1]) + layout[i][1]) & 7) & 1) & 1
             small[i] = small[i] | (UInt8(bit) << j)
         }
     }

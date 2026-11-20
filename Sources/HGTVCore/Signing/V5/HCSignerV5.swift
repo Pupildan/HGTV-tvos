@@ -232,7 +232,8 @@ final class HCSignerV5: @unchecked Sendable {
         var j: Int32 = 0
         for i in 0...255 {
             j = (j &+ s[i] &+ key[i % 8]) & 255
-            s.swapAt(i, Int(j))
+            // Kotlin: s[i] = s[j]（赋值，非交换）
+            s[i] = s[Int(j)]
         }
         j = 0
         var out = [UInt8](repeating: 0, count: input.count)
@@ -345,9 +346,9 @@ final class HCSignerV5: @unchecked Sendable {
     func helios(_ ts: Int32, licenseId: String = "646637794") -> String {
         let random = kRand()
         let ascii = Array(hcBytesToHex(hcDigest("MD5", hcLe32(random) + Array("8662".utf8))).utf8)
+        // Kotlin: table = mutableListOf(words[0])（含 w0）；b0=words.removeAt(0)=w0；b8=words.removeAt(0)=w1
         var words = (0..<4).map { hcI64(ascii, $0 * 8, little: true) }
-        var table = [Int64]()
-        table.append(words.removeFirst())
+        var table = [words[0]]
         var b0 = words.removeFirst()
         var b8 = words.removeFirst()
         for i in 0..<34 {
