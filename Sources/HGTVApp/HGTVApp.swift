@@ -26,6 +26,10 @@ struct HGTVApp: App {
             await DiagnosticsLogger.shared.registerTransport(TCPTransport())
             await DiagnosticsLogger.shared.start()
 
+            // —— flush 上次崩溃（V5 签名）存下的面包屑：崩溃发生在日志通道建立之前，
+            //    面包屑靠 UserDefaults 存活；这次启动通道就绪，先交出来定位上次崩点。
+            V5CrashBreadcrumbs.flushLastCrash()
+
             let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
             let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
             DiagnosticsLogger.info("App 启动 v\(ver) build \(build)", category: "app",

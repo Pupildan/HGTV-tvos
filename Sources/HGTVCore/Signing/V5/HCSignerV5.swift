@@ -333,12 +333,12 @@ final class HCSignerV5: @unchecked Sendable {
             state = fresh
         }
         stateLock.unlock()
-        DiagnosticsLogger.warn("V5 🧬 medusa 状态就绪，进入 generate", category: "sign")
+        V5CrashBreadcrumbs.mark("V5 🧬 medusa 状态就绪，进入 generate", category: "sign")
         guard let out = state.generate(url: url, body: body, bodyMD5: nil, ts: Int64(UInt32(bitPattern: ts)), nowMS: now) else {
             DiagnosticsLogger.error("V5 medusa: generate 返回 nil（envelope/layout 降级）", category: "sign")
             return nil
         }
-        DiagnosticsLogger.warn("V5 🧬 medusa generate 完成 len=\(out.count)", category: "sign")
+        V5CrashBreadcrumbs.mark("V5 🧬 medusa generate 完成 len=\(out.count)", category: "sign")
         return out
     }
 
@@ -382,7 +382,7 @@ final class HCSignerV5: @unchecked Sendable {
 
     func sign(_ base: String, _ values: [String: String], body: [UInt8]? = nil,
               method: String? = nil, deviceOverride: [String: String]? = nil) -> Request? {
-        DiagnosticsLogger.warn("V5 🔢 sign 开始 base=\(base) bodyLen=\(body?.count ?? 0)", category: "sign")
+        V5CrashBreadcrumbs.mark("V5 🔢 sign 开始 base=\(base) bodyLen=\(body?.count ?? 0)", category: "sign")
         var d = device
         if let ov = deviceOverride { d.merge(ov) { _, new in new } }
         d = d.filter { !$0.value.isEmpty }
@@ -396,7 +396,7 @@ final class HCSignerV5: @unchecked Sendable {
             merged["_rticket"] = String(ticket)
             let query = HCSignerV5.encode(merged)
             if branch(query, body, ts) == 0 {
-                DiagnosticsLogger.warn("V5 🔢 分支命中 offset=\(offset)", category: "sign")
+                V5CrashBreadcrumbs.mark("V5 🔢 分支命中 offset=\(offset)", category: "sign")
                 let url = "\(base)?\(query)"
                 let random = Int32(truncatingIfNeeded: Int64(rnd() * 65536.0))
                 let passportPath = base.contains("/passport/")
@@ -410,14 +410,14 @@ final class HCSignerV5: @unchecked Sendable {
                 headers["x-xs-from-web"] = "0"
                 headers["x-khronos"] = String(ts)
                 headers["x-ladon"] = realLadon()
-                DiagnosticsLogger.warn("V5 🔢 ladon/argus 完成", category: "sign")
+                V5CrashBreadcrumbs.mark("V5 🔢 ladon/argus 完成", category: "sign")
                 headers["x-argus"] = realArgus(ts)
                 headers["x-gorgon"] = gorgonAligned(query, body, ts, random)
-                DiagnosticsLogger.warn("V5 🔢 gorgon 完成", category: "sign")
+                V5CrashBreadcrumbs.mark("V5 🔢 gorgon 完成", category: "sign")
                 headers["x-helios"] = helios(ts)
-                DiagnosticsLogger.warn("V5 🔢 helios 完成，进入 medusa", category: "sign")
+                V5CrashBreadcrumbs.mark("V5 🔢 helios 完成，进入 medusa", category: "sign")
                 headers["x-medusa"] = medusa(url, body, ts, d) ?? ""
-                DiagnosticsLogger.warn("V5 🔢 medusa 完成", category: "sign")
+                V5CrashBreadcrumbs.mark("V5 🔢 medusa 完成", category: "sign")
                 headers["x-tt-dt"] = ""
                 if passportPath {
                     headers["x-vc-bdturing-sdk-version"] = "4.0.3.cn"
