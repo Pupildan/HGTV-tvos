@@ -278,3 +278,87 @@ AVPlayer **不能直接播内存 Data**，只能给 URL。故起本地 HTTP 服�
 | `data += body`（Optional） | `data += (body ?? [])` |
 
 **交付**：CI run 44610636621 ✅ success → `HGTV-tvOS-v37-unsigned.ipa`（7.2MB，Assets.car 在包）。数据层是否真通（landpage 去重效果 / 弹幕 110001 是否解除）待**真机**旁加载验证。
+
+
+---
+
+## 十、v37→v60 landpage 攻坚全记录（2026-11-20 ~ 11-22）—— 坑、方法、结论、未来路线
+
+> 目标：推荐流接入**正确池子** = `POST /reading/distribution/category/landpage/v/`（原版推荐流，真分页 + session 去重，无限刷不重复）。
+> 现状：**客户端所有可对齐的变量已全部对齐抓包 ground truth，landpage 仍返 200+0 字节**（跨 6+ 身份、4 主机层级、两版签名器）。这份记录写给下一个接手的人。
+
+### 10.1 已解决（这轮的真实成果，不要重做）
+
+| 成果 | 验证方式 |
+|---|---|
+| ✅ V5 签名器从秒崩到完全可用 | bookmall+V5 = 200/66KB 真实数据（服务端认可签名） |
+| ✅ 真实 device_register 移植 | PC(new_user=1, device_id=2970193670715852) + tvOS(v52, device_id=3568328001198260) 双实测成功，store-region=cn-zj cookie 到手 |
+| ✅ landpage 请求参数全对齐 | body 逐字节一致(195B)、73532 版本族+channel=69310258a、sinfonlineb 层级、全身份档案参数（openudid-source/profile-format/mcc_mnc/rom/apk_first_install_time）、去 install_id |
+| ✅ 身份指纹一致性 | 注册 payload / 持久化凭证 / query 三处同组 cdid/openudid/clientudid |
+| ✅ 重启凭证恢复 | 完整身份持久化(HGTV.identity.credentials) + init 恢复注入（旧版 skip 注册导致回退旧硬编码身份的 bug 已修） |
+| ✅ 身份自愈机制 | 原版"被拒→rebuilding→换新身份"已移植：预置池→新注册轮换 |
+| ✅ 无兜底纯净测试模式 | bookmall 兜底已删（用户要求），失败即报错 |
+
+### 10.2 踩过的坑（按代价排序）
+
+| # | 坑 | 细节 |
+|---|---|---|
+| 1 | **Kotlin→Swift 语言语义暗坑**（比算法难得多） | `UInt32(负数)` 是 checked 转换直接秒崩（Kotlin rotateLeft 负移位合法）；Swift stdlib 无 rotate（在 swift-numerics）；`UInt8 >> ≥8` 越界；Int64 无 rotateLeft/Right。修法=全部移位实现 + `UInt32(bitPattern:n)&31` |
+| 2 | **无 dSYM 读 .ips 定位** | 看 faultingThread 的 queue（后台 Task=签名/网络）、exception.type（SIGTRAP=主动 trap）、寄存器 `type metadata for X`（运行时构造含 X 的错误信息）、strings 对号 fatalError 文案 |
+| 3 | **崩溃安全面包屑**（定位利器） | 崩溃发生在日志通道连接前 → 面包屑写 UserDefaults（synchronize 存活）→ 下次启动**同步检测到面包屑则禁用 V5**（防再崩）→ flush 出来。⚠️ 检测必须在 App.init **同步**执行，放异步 Task 会输给崩溃竞态 |
+| 4 | **V5 移植抄表抄丢字节** | hcMedusaTable64SubstitutionSeed 255/256（index 136 的 165 丢了+4 个负号抄错）→ 越界崩+签名错。**移植常量表必须程序化 diff 验证** |
+| 5 | **凭证重启不恢复** | ensureRegistered 见"已注册"就 skip，从不注入拦截器凭证 → 重启后所有请求回退旧硬编码身份。修=身份全字段持久化 + init 恢复 + skip 条件加"凭证存在" |
+| 6 | **身份三元组三处不同源** | 注册 payload 随机一组 cdid/openudid/clientudid，Identity 返回另一组，query 又用第三组（CommonParams 硬编码）→ 指纹不匹配。修=payload 返回三元组，全程同源 |
+| 7 | **沙箱路径漂移** | apktool_work/build、kotlin_ref 等目录"时有时无"——**数据一直都在**。先怀疑工具再怀疑数据 |
+| 8 | **日志服务器进程死亡+写缓冲** | received.jsonl mtime 停滞 ≠ 没日志，可能是进程死了或 Python 写缓冲未落盘。重启用 `python -u` 无缓冲 |
+| 9 | **盲试参数对静默服务器性价比极低** | 服务端拒绝无任何错误信息（200+0B 或 device_id=0），盲改一个字段猜一次 = 每轮 20-30 分钟构建+用户手装。**必须先拿到 headers 级抓包再改** |
+| 10 | **保底模式污染测试信号** | bookmall 兜底让"landpage 是否通了"无法从 UI 判断（用户测试看到的永远是旧池子内容）。已按用户要求删除 |
+
+### 10.3 试过的方法清单（landpage 0 字节攻坚，全部失败）
+
+| # | 方法 | 结果 |
+|---|---|---|
+| 1 | 主机层级 lf → sinfonlineb/a/c 轮换 | 全 0B（lf 本就不服务 landpage；sinfonline 层也 0B） |
+| 2 | 73532 版本族 + channel=69310258a（抓包实锤） | 0B |
+| 3 | 真实注册新身份（PC+tvOS 双实测 new_user=1） | 0B |
+| 4 | 身份指纹一致性（同组 cdid/openudid/clientudid） | 0B |
+| 5 | 重启凭证恢复（不再回退旧硬编码身份） | 0B |
+| 6 | 抓包 #2 全套差缺参数 + 去 install_id | 0B |
+| 7 | 预置长龄身份（会话镜像 1290207924645523，WiFi 下出过内容）| 0B |
+| 8 | 预置抓包全身份（1642051663562816，流量下 landpage 成功）| 0B |
+| 9 | 身份自愈轮换（最多 4 个身份/次启动） | 0B |
+| 10 | 对照：bookmall+V5 同网络同签名 | **正常 66KB** → 排除签名/网络路径整体故障 |
+
+### 10.4 关键对照事实（推理的基石）
+
+1. 原版 landpage 成功抓包（00:38-00:40，3 条）全部在手机**流量**网络
+2. 原版 app 在本 WiFi（11-20 00:15）："只有标题封面、视频放不出"——**用户理解为内容能刷**；但未在 WiFi 下抓过原版包，**无法确认它当时用的是哪个接口**
+3. bookmall（低敏感目录）在本 WiFi 正常；真实注册在本 WiFi 正常 → IP 没有全烧
+4. 我们与抓包成功请求的差异已收敛到：**HTTP headers 全集**（抓包只 dump 了 URL/QRY/BODY，**headers 从未抓到**——x-tt-token/Cookie 全集/Accept-Language 等可能存在差异）和**出口 IP**
+5. 会话镜像身份 token 151 位 vs 新注册 125 位——token 类型/版本可能不同（passport 匿名 token vs 设备 token？），未深究
+
+### 10.5 未来解决路线（按性价比排序）
+
+1. **【最高优先·缺口唯一】抓原版 landpage 的完整 headers**
+   - 现有注入只 dump URL/QRY/BODY。用 LSPosed/HookBridge（手机上已有框架，logcat 里可见 `p.tzFVBSwRiuBeNxMbglhudvCxQI.dY.XP.HookBridge`）写一个 OkHttp 拦截器模块 dump 全 headers；或用 HttpCanary/Charles 证书装到手机抓 HTTPS
+   - 拿到后与我们的 headers 逐项 diff——这是唯一没排除的变量
+2. **【2 分钟判据】热点测试**
+   - ATV 连手机热点跑 v60：通了 = IP 门控实锤（给 ATV 配代理/常驻热点即解决）；不通 = 彻底排除 IP，聚焦 headers
+   - 注意：如果走这条路，v60 已无兜底，结果信号干净
+3. **【身份信任假说】养身份**
+   - 注册后不立即请求：先发 recommend_stat/report 曝光上报（端点已在 config）+ 等待 10-30 分钟 + 模拟正常启动节奏，再请求 landpage。原版身份有历史积累，新身份零历史可能被风险系统扣内容
+4. **【token 深究】**
+   - 会话镜像 token 151 位 vs 新注册 125 位：确认是否 x-tt-token 格式（带 expiry 前缀 `AAATT`...）——若是 passport token，我们可能一直发错了 token 类型
+5. **【模拟器对照】**
+   - PC 安卓模拟器 + 原版 1.3.8.6 + mitmproxy：既能抓全 headers，又能直接看 WiFi 下原版行为（feed 到底空不空、用什么接口）
+6. **【数据面备选】**
+   - 若 landpage 最终无解：bookmall 池扩展（探 tab 5/2/9/11/12）、红果 web 通路（选集已通）、或接受 bookmall+定期换身份降低重复感
+
+### 10.6 本轮新增的基础设施（复用价值）
+
+- `Signing/V5/` 完整可用（1.3.7.7 Kotlin crypto 移植，签名服务端认可）
+- `RealDeviceRegister.swift` 真实注册 + 预置身份池（会话镜像/抓包身份已内嵌）
+- `DeviceRegisterService.applyPresetIdentity/reregister` 多身份切换
+- `exp_scripts/register_v2_rebuild.py`（Python 注册复刻）、`verify_gorgon_fix.py`（gorgon 对拍）、`diff_all_tables.py`（常量表全量 diff）
+- `kotlin_ref/`（1.3.7.7 Kotlin crypto 全量拷贝）、`apk_new/jadx_out/`（1.3.8.6 反编译）、`apktool_work/build/capture_now.txt`（真机抓包 135k 行）
+- 崩溃安全面包屑 `V5CrashBreadcrumbs`（UserDefaults 存活 + 启动 flush + 同步禁用开关）
