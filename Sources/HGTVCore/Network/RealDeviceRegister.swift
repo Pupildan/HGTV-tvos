@@ -9,7 +9,7 @@
 import Foundation
 import CryptoKit
 
-enum RealDeviceRegister {
+public enum RealDeviceRegister {
 
     static let host = "log.snssdk.com"
     static let path = "/service/2/device_register/"
@@ -39,7 +39,7 @@ enum RealDeviceRegister {
     // 身份 B：真机抓包 00:38:20 landpage 成功请求所用的全身份（流量网络）
     // 每个预置身份携带自己的完整三星档案——query/V5 device dict/UA 全套随之切换。
 
-    static let presetIdentities: [Identity] = [
+    public static let presetIdentities: [Identity] = [
         Identity(
             deviceID: "1290207924645523",
             installID: "1290207924649619",

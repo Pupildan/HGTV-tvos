@@ -95,7 +95,7 @@ final class PlaybackEngine {
         // 预置身份池轮换
         for i in 0..<presetCount {
             DeviceRegisterService.shared.applyPresetIdentity(i)
-            if let page = tryLandpageOnce(tag: "预置#\(i)") {
+            if let page = await tryLandpageOnce(tag: "预置#\(i)") {
                 finishLoad(page, source: "landpage 预置#\(i)")
                 return
             }
@@ -108,7 +108,7 @@ final class PlaybackEngine {
                 DiagnosticsLogger.error("身份自愈失败: \(error.localizedDescription)", category: "playback")
                 break
             }
-            if let page = tryLandpageOnce(tag: "新注册#\(attempt)") {
+            if let page = await tryLandpageOnce(tag: "新注册#\(attempt)") {
                 finishLoad(page, source: "landpage 新注册#\(attempt)")
                 return
             }
@@ -120,7 +120,7 @@ final class PlaybackEngine {
     }
 
     /// 尝试一次 landpage（首页）；成功返回页数据。
-    private func tryLandpageOnce(tag: String) -> APIService.LandpagePage? {
+    private func tryLandpageOnce(tag: String) async -> APIService.LandpagePage? {
         do {
             let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
             if !page.items.isEmpty {
