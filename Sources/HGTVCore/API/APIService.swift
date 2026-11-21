@@ -134,6 +134,16 @@ public final class APIService: Sendable {
             "client_req_type": 3,
         ]
         let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        // query 版本族覆写（真机抓包 00:38:19 实锤）：landpage 走 73532/7.3.5.32 + channel=69310258a。
+        // 这些键在 intercept 里覆盖 CommonParams 的默认值。
+        let family: [String: String] = [
+            "version_code": "73532",
+            "version_name": "7.3.5.32",
+            "manifest_version_code": "73532",
+            "update_version_code": "73532",
+            "pv_player": "73532",
+            "channel": "69310258a",
+        ]
         let hosts = [HGTVConfig.Host.sinfonlineb, HGTVConfig.Host.sinfonlinea,
                      HGTVConfig.Host.sinfonlinec, HGTVConfig.Host.fqnovel]
         var lastError: Error = HTTPError.invalidResponse
@@ -142,9 +152,10 @@ public final class APIService: Sendable {
                 host: host,
                 path: HGTVConfig.Path.categoryLandpage,
                 method: "POST",
-                query: [:],
+                query: family,
                 body: body,
-                signed: true   // landpage/video 版本族（74332），appFamily 默认 false
+                signed: true,
+                landpageFamily: true   // UA/device dict 同步 73532 族
             )
             do {
                 let raw = try await http.request(target)

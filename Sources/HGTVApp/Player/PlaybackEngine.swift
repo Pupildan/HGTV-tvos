@@ -44,11 +44,14 @@ final class PlaybackEngine {
     var onFeedRestored: (() -> Void)?
 
     private var seenVids: Set<String> = []
-    /// feed 内容池轮换：3 个 tab 实测内容**完全不相交**（tab8 找剧 / tab38 真人剧 / tab32 漫剧）。
-    /// bookmall 端点不提供翻页（has_more 恒 false），轮换 tab 才有真正多样的无限流。
-    /// （v37/v39 曾试换 landpage 分页接口，但旧签名器签 landpage 返 0 字节 → 回退 bookmall。）
+    /// bookmall 保底轮换（仅当 landpage 全层级失败才用）。
     private let feedTabTypes: [Int] = [8, 38, 32]
     private var feedTabCursor = 0
+    /// landpage 翻页游标（成功接入后 loadMore 续页）。
+    private var feedOffset = 0
+    private var feedSessionId = ""
+    private var feedExhausted = false
+    private var landpageActive = false
     /// 已确认拿不到播放地址的 vid（如电影）。resolve 失败时记录，用于自动跳过。
     private var failedVids: Set<String> = []
 
@@ -84,49 +87,46 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载，三级回退（每级结果都进日志，供诊断）：
-    /// ① landpage（V5 签名，正确池子）→ ② bookmall（V5 签名，A/B 判签名有效性）
-    /// → ③ bookmall（旧 XGorgon 签名器，v36 已验证保底）。
+    /// 首次加载：①强制完成注册（幂等，保证 landpage 带全新身份+token+cookie）
+    /// ②landpage（sinfonlineb→a→c→lf，73532 族+channel=69310258a，正确池子）
+    /// ③仅当 landpage 全层级失败才 bookmall 兜底（正常不会走到）。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        // ① landpage + V5（正确池子）
+        // ① 注册门槛：确保全新身份就绪（v52 真实注册，幂等）
+        do {
+            try await DeviceRegisterService.shared.ensureRegistered()
+        } catch {
+            DiagnosticsLogger.warn("注册未就绪仍继续 landpage（可能降级）: \(error.localizedDescription)", category: "playback")
+        }
+
+        // ② landpage 正确池子
         do {
             let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+            feedOffset = page.nextOffset
+            feedSessionId = page.sessionId
+            feedExhausted = !page.hasMore
+            landpageActive = page.hasMore || !page.items.isEmpty
             let added = merge(page.items)
             if !added.isEmpty {
                 hasLoaded = true; errorMessage = nil
-                DiagnosticsLogger.log("首批 feed：① landpage+V5 成功 \(added.count) 条", category: "playback", level: .info)
+                DiagnosticsLogger.log("首批 feed：landpage 正确池子 \(added.count) 条 session=\(feedSessionId)",
+                                      category: "playback", level: .info)
                 return
             }
-            DiagnosticsLogger.warn("① landpage+V5 返回 0 条（响应空或解析空）", category: "playback")
+            DiagnosticsLogger.warn("landpage 返回 0 条", category: "playback")
         } catch {
-            DiagnosticsLogger.warn("① landpage+V5 失败: \(error.localizedDescription)", category: "playback")
+            DiagnosticsLogger.warn("landpage 失败: \(error.localizedDescription)", category: "playback")
         }
+        landpageActive = false
 
-        // ② bookmall + V5（A/B：判定 V5 签名是否被服务端接受）
-        do {
-            let groups = try await APIService.shared.fetchHome(tabType: 8, legacy: false)
-            let batch = groups.flatMap { $0.items ?? [] }
-            let added = merge(batch)
-            if !added.isEmpty {
-                hasLoaded = true; errorMessage = nil
-                DiagnosticsLogger.log("首批 feed：② bookmall+V5 成功 \(added.count) 条 → V5 签名有效，landpage 空是接口/门控层", category: "playback", level: .info)
-                return
-            }
-            DiagnosticsLogger.warn("② bookmall+V5 返回 0 条 → V5 签名仍被服务端拒", category: "playback")
-        } catch {
-            DiagnosticsLogger.warn("② bookmall+V5 失败: \(error.localizedDescription)", category: "playback")
-        }
-
-        // ③ bookmall + 旧签名器（v36 已验证保底）。
-        // 并发抽干内容池：3 tab × 5 轮（v50 实测首批只拿 19 条就 plateau，池上限 ~50）。
+        // ③ bookmall 兜底（landpage 失败时才有内容可看）
         do {
             var allItems: [DramaItem] = []
             let tabSnapshot = feedTabTypes
-            let requestCount = tabSnapshot.count * 5   // 15 次请求（3 tab × 5 轮）
+            let requestCount = tabSnapshot.count * 5
             try await withThrowingTaskGroup(of: [DramaItem].self) { group in
                 for i in 0..<requestCount {
                     let tab = tabSnapshot[i % tabSnapshot.count]
@@ -144,34 +144,48 @@ final class PlaybackEngine {
             let added = merge(allItems)
             if !added.isEmpty {
                 hasLoaded = true; errorMessage = nil
-                DiagnosticsLogger.log("首批 feed：③ bookmall+legacy 保底成功 \(added.count) 条（15 请求抽干池）", category: "playback", level: .info)
+                DiagnosticsLogger.log("首批 feed：bookmall 兜底 \(added.count) 条", category: "playback", level: .info)
                 return
             }
             errorMessage = "暂无推荐内容"
-            DiagnosticsLogger.error("③ bookmall+legacy 也为空", category: "playback")
+            DiagnosticsLogger.error("bookmall 兜底也为空", category: "playback")
         } catch {
             errorMessage = error.localizedDescription
-            DiagnosticsLogger.error("首批 feed 全部回退失败: \(error.localizedDescription)", category: "playback")
+            DiagnosticsLogger.error("首批 feed 全部失败: \(error.localizedDescription)", category: "playback")
         }
     }
 
     /// 无限 feed：landpage 翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
-    /// 无限 feed：按 tab 轮换请求（8→38→32 循环），按 vid 去重后追加。
-    /// landpage 分页暂缓（旧版签名器签 landpage 返空待解，回退 bookmall 保可用）。
+    /// 无限 feed：landpage 接通时走真翻页（offset/session_id 续页）；否则 bookmall tab 轮换。
     func loadMore() async {
         guard !isLoadingMore else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
+        if landpageActive {
+            do {
+                let page = try await APIService.shared.fetchLandpage(offset: feedOffset, sessionId: feedSessionId)
+                feedOffset = page.nextOffset
+                feedSessionId = page.sessionId
+                feedExhausted = !page.hasMore
+                var batch = page.items
+                batch.shuffle()
+                let added = merge(batch)
+                DiagnosticsLogger.log("追加 feed(landpage offset=\(feedOffset)) +\(added.count) 条，总计 \(items.count)",
+                                      category: "playback", level: .info)
+            } catch {
+                DiagnosticsLogger.warn("landpage 翻页失败: \(error.localizedDescription)", category: "playback")
+            }
+            return
+        }
         do {
             let tab = feedTabTypes[feedTabCursor % feedTabTypes.count]
             feedTabCursor += 1
-            let groups = try await APIService.shared.fetchHome(tabType: tab)
+            let groups = try await APIService.shared.fetchHome(tabType: tab, legacy: true)
             var batch = groups.flatMap { $0.items ?? [] }
-            batch.shuffle()   // 每批洗牌，追加顺序不固定
+            batch.shuffle()
             let added = merge(batch)
             DiagnosticsLogger.log("追加 feed(tab=\(tab)) +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
         } catch {
-            // 追加失败静默（保留现有流），仅记日志。
             DiagnosticsLogger.warn("追加 feed 失败: \(error.localizedDescription)", category: "playback")
         }
     }

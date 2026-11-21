@@ -10,6 +10,8 @@ import Foundation
 enum HCVendor5 {
     static let videoVersionCode = "74332"
     static let appVersionCode = "72232"
+    /// landpage 专用族（真机抓包实锤：query 全套 73532/7.3.5.32/pv_player=73532）
+    static let landpageVersionCode = "73532"
     private static let defaultBuild = "BP2A.250605.031.A3"
 
     static let device: [String: String] = [
@@ -50,6 +52,17 @@ enum HCVendor5 {
         v["manifest_version_code"] = "72232"
         v["update_version_code"] = "72232"
         v["pv_player"] = "72232"
+        return v
+    }()
+
+    /// landpage 族（真机抓包 00:38:19 实锤）：五项版本号 73532/7.3.5.32。
+    static let landpageDevice: [String: String] = {
+        var v = device
+        v["version_code"] = "73532"
+        v["version_name"] = "7.3.5.32"
+        v["manifest_version_code"] = "73532"
+        v["update_version_code"] = "73532"
+        v["pv_player"] = "73532"
         return v
     }()
 

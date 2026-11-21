@@ -22,6 +22,8 @@ public protocol HTTPTarget {
     var appFamily: Bool { get }
     /// 强制走旧 XGorgon 签名器（v36 已验证 bookmall 可用）。诊断/回退用。
     var legacySigning: Bool { get }
+    /// landpage 专用族（73532/7.3.5.32，真机抓包实锤）。
+    var landpageFamily: Bool { get }
     /// 调用方额外补充头（如 Content-Encoding: gzip）；经 SignInterceptor 注入
     var extraHeaders: [String: String] { get }
 }
@@ -33,6 +35,8 @@ extension HTTPTarget {
     public var appFamily: Bool { false }
     /// 默认不走旧签名器
     public var legacySigning: Bool { false }
+    /// 默认非 landpage 族
+    public var landpageFamily: Bool { false }
 }
 
 public struct HTTPTargetImpl: HTTPTarget {
@@ -44,6 +48,7 @@ public struct HTTPTargetImpl: HTTPTarget {
     public let signed: Bool
     public let appFamily: Bool
     public let legacySigning: Bool
+    public let landpageFamily: Bool
     public let extraHeaders: [String: String]
 
     public init(host: String,
@@ -54,6 +59,7 @@ public struct HTTPTargetImpl: HTTPTarget {
                 signed: Bool = true,
                 appFamily: Bool = false,
                 legacySigning: Bool = false,
+                landpageFamily: Bool = false,
                 extraHeaders: [String: String] = [:]) {
         self.host = host
         self.path = path
@@ -63,6 +69,7 @@ public struct HTTPTargetImpl: HTTPTarget {
         self.signed = signed
         self.appFamily = appFamily
         self.legacySigning = legacySigning
+        self.landpageFamily = landpageFamily
         self.extraHeaders = extraHeaders
     }
 }
@@ -127,6 +134,7 @@ public final class HTTPClient: Sendable {
                 body: target.body.map { [UInt8]($0) },
                 extraHeaders: target.extraHeaders,
                 appFamily: target.appFamily,
+                landpageFamily: target.landpageFamily,
                 legacySigning: target.legacySigning
             )
         } else {

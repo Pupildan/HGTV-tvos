@@ -98,6 +98,7 @@ public final class SignInterceptor: @unchecked Sendable {
                           body: [UInt8]?,
                           extraHeaders: [String: String] = [:],
                           appFamily: Bool = false,
+                          landpageFamily: Bool = false,
                           legacySigning: Bool = false) -> SignedRequest {
         // 1) 合并公共 query（device_id / iid 来自凭证）
         var merged = CommonParams.query(
@@ -120,7 +121,7 @@ public final class SignInterceptor: @unchecked Sendable {
             // V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
             // appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
             // V5 任一环节降级返回 nil 时，回退到旧 XGorgon 签名器，保证 App 不 crash、请求照发。
-            let deviceOverride = appFamily ? HCVendor5.appDevice : nil
+            let deviceOverride = landpageFamily ? HCVendor5.landpageDevice : (appFamily ? HCVendor5.appDevice : nil)
             v5Lock.lock()
             let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
             v5Lock.unlock()
