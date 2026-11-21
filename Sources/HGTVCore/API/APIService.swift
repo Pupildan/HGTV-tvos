@@ -117,6 +117,9 @@ public final class APIService: Sendable {
 
     /// 拉一页推荐流。offset=0/sessionId="" 为首页（req_type=default），后续翻页传上页
     /// 返回的 offset/sessionId 且 req_type=only_content。
+    ///
+    /// 主机层级（1.3.8.6 反编译实锤）：landpage 走 sinfonlineb（q()=T3.j(2,"sinfonlineb")），
+    /// api5-normal-lf 层级不服务该接口（实测恒 200+0 字节）。带 a/c/lf 故障转移。
     public func fetchLandpage(offset: Int, sessionId: String) async throws -> LandpagePage {
         let isFirst = offset == 0 && sessionId.isEmpty
         let payload: [String: Any] = [
@@ -131,16 +134,33 @@ public final class APIService: Sendable {
             "client_req_type": 3,
         ]
         let body = try JSONSerialization.data(withJSONObject: payload, options: [])
-        let target = HTTPTargetImpl(
-            host: HGTVConfig.Host.fqnovel,
-            path: HGTVConfig.Path.categoryLandpage,
-            method: "POST",
-            query: [:],
-            body: body,
-            signed: true   // landpage/video 版本族（74332），appFamily 默认 false
-        )
-        let raw = try await http.request(target)
-        return try Self.parseLandpage(from: raw, requestOffset: offset, requestSessionId: sessionId)
+        let hosts = [HGTVConfig.Host.sinfonlineb, HGTVConfig.Host.sinfonlinea,
+                     HGTVConfig.Host.sinfonlinec, HGTVConfig.Host.fqnovel]
+        var lastError: Error = HTTPError.invalidResponse
+        for host in hosts {
+            let target = HTTPTargetImpl(
+                host: host,
+                path: HGTVConfig.Path.categoryLandpage,
+                method: "POST",
+                query: [:],
+                body: body,
+                signed: true   // landpage/video 版本族（74332），appFamily 默认 false
+            )
+            do {
+                let raw = try await http.request(target)
+                if raw.count > 0 {
+                    let page = try Self.parseLandpage(from: raw, requestOffset: offset, requestSessionId: sessionId)
+                    DiagnosticsLogger.log("landpage host=\(host) 成功 \(page.items.count) 条 bytes=\(raw.count)",
+                                          category: "playback", level: .info)
+                    return page
+                }
+                DiagnosticsLogger.warn("landpage host=\(host) 返回 0 字节，换下一个", category: "playback")
+            } catch {
+                DiagnosticsLogger.warn("landpage host=\(host) 失败: \(error.localizedDescription)", category: "playback")
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     /// 解析 landpage 响应：递归提取 video_data[]（复用 extractVideos）+ 翻页游标。
@@ -499,7 +519,7 @@ public final class APIService: Sendable {
         let body = try JSONSerialization.data(withJSONObject: payload, options: [])
 
         let target = HTTPTargetImpl(
-            host: HGTVConfig.Host.fqnovel,
+            host: HGTVConfig.Host.sinfonlinea,   // 原版弹幕层级（真机抓包+反编译 T3.j(2,"sinfonlinea")）
             path: "/novel/commentapi/comment/list/\(vid)/v1/",
             method: "POST",
             query: [:],

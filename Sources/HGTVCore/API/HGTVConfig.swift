@@ -35,6 +35,11 @@ public enum HGTVConfig {
         public static let hongguo = "hongguoduanju.com"
         /// 番茄内容接口（dex: api5-normal-*.fqnovel.com，reading.snssdk.com）
         public static let fqnovel = "api5-normal-lf.fqnovel.com"
+        /// sinfonline 层级（1.3.8.6 反编译 T3.f1958b）：landpage=b、弹幕/评论=a。
+        /// api5-normal-lf 层级不服务 landpage（实测恒 200+0 字节）。
+        public static let sinfonlinea = "api5-normal-sinfonlinea.fqnovel.com"
+        public static let sinfonlineb = "api5-normal-sinfonlineb.fqnovel.com"
+        public static let sinfonlinec = "api5-normal-sinfonlinec.fqnovel.com"
         public static let readingSnssdk = "reading.snssdk.com"
         public static let novelSnssdk = "novel.snssdk.com"
         /// 字节账号体系
