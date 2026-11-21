@@ -326,21 +326,26 @@ func hcMedusaDetailed(
         for i in 0..<12 { b[i] = UInt8.random(in: 0...255) }
         return (0..<3).map { hcReadLe32(b, $0 * 4) & 0x7fffffff }
     }()
+    V5CrashBreadcrumbs.mark("🧬 detailed 开始")
     var process = thread.process
     process.record8 |= 256
     // Kotlin: rotateLeft(tokenPointerTLS xor crc64(license) xor ts, 4) & 0xFFFFFFFF
     let tlsMask = krotl64(thread.tokenPointerTLS ^ hcMedusaCRC64(Array(i.licenseID.utf8)) ^ (o.timestamp & Int64(0xFFFFFFFF)), 4) & Int64(0xFFFFFFFF)
     var tls = (thread.tls ^ tlsMask) & Int64(0xFFFFFFFF)
+    V5CrashBreadcrumbs.mark("🧬 tls/crc64 完成")
 
     let stub = o.bodyMD5 ?? ((o.body != nil && o.body!.count > 0) ? hcDigest("MD5", o.body!) : [UInt8](repeating: 0, count: 16))
     let query = Array(hcMedusaQuery(url).utf8)
     let qh = hcSm3(query)
+    V5CrashBreadcrumbs.mark("🧬 sm3 完成 queryLen=\(query.count)")
     var data = [UInt8](repeating: 0, count: 52)
     for k in 0..<32 { data[k] = qh[k] }
     for k in 0..<16 { data[32+k] = stub[k] }
     data.replaceSubrange(48..<52, with: hcLe32(Int32(truncatingIfNeeded: o.timestamp & Int64(0xFFFFFFFF))))
     let selector = Int32(truncatingIfNeeded: hcMedusaAP(data, initial: 0x20230928, 6, 4, 12, 7) & 15)
+    V5CrashBreadcrumbs.mark("🧬 selector=\(selector)，进入 core")
     let dgst = hcMedusaTail(hcMedusaCore(data, selector: selector, timestamp: o.timestamp), checks: s.requestChecks)
+    V5CrashBreadcrumbs.mark("🧬 core/tail 完成")
 
     var detection: Int64 = 0
     for n in s.detectionTypes { detection |= (1 << Int64(n & 31)) }
