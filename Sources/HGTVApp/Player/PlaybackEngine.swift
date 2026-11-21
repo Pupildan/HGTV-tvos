@@ -87,42 +87,51 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：①强制完成注册（幂等，保证 landpage 带全新身份+token+cookie）
-    /// ②landpage（sinfonlineb→a→c→lf，73532 族+channel=69310258a，正确池子）
-    /// ③仅当 landpage 全层级失败才 bookmall 兜底（正常不会走到）。
+    /// 首次加载：landpage 正确池子 + 身份自愈（原 app 机制：被拒 → rebuilding → 换新身份重试）。
+    /// 最多 3 个身份轮换；全部被拒才 bookmall 兜底。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        // ① 注册门槛：确保全新身份就绪（v52 真实注册，幂等）
         do {
             try await DeviceRegisterService.shared.ensureRegistered()
         } catch {
-            DiagnosticsLogger.warn("注册未就绪仍继续 landpage（可能降级）: \(error.localizedDescription)", category: "playback")
+            DiagnosticsLogger.warn("注册未就绪仍继续: \(error.localizedDescription)", category: "playback")
         }
 
-        // ② landpage 正确池子
-        do {
-            let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
-            feedOffset = page.nextOffset
-            feedSessionId = page.sessionId
-            feedExhausted = !page.hasMore
-            landpageActive = page.hasMore || !page.items.isEmpty
-            let added = merge(page.items)
-            if !added.isEmpty {
-                hasLoaded = true; errorMessage = nil
-                DiagnosticsLogger.log("首批 feed：landpage 正确池子 \(added.count) 条 session=\(feedSessionId)",
-                                      category: "playback", level: .info)
-                return
+        // 身份自愈轮换：landpage 返空 = 当前身份被拒 → 换新身份重试（原 app 机制）
+        for attempt in 1...3 {
+            do {
+                let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+                feedOffset = page.nextOffset
+                feedSessionId = page.sessionId
+                feedExhausted = !page.hasMore
+                let added = merge(page.items)
+                if !added.isEmpty {
+                    landpageActive = page.hasMore || !page.items.isEmpty
+                    hasLoaded = true; errorMessage = nil
+                    DiagnosticsLogger.log("首批 feed：landpage 正确池子 \(added.count) 条（身份#\(attempt)）session=\(feedSessionId)",
+                                          category: "playback", level: .info)
+                    return
+                }
+                DiagnosticsLogger.warn("landpage 身份#\(attempt) 返 0 条 → 视为身份被拒", category: "playback")
+            } catch {
+                DiagnosticsLogger.warn("landpage 身份#\(attempt) 失败: \(error.localizedDescription)", category: "playback")
             }
-            DiagnosticsLogger.warn("landpage 返回 0 条", category: "playback")
-        } catch {
-            DiagnosticsLogger.warn("landpage 失败: \(error.localizedDescription)", category: "playback")
+            if attempt < 3 {
+                do {
+                    try await DeviceRegisterService.shared.reregister()
+                    DiagnosticsLogger.log("身份自愈：已重建新身份（第 \(attempt) 次切换），重试 landpage", category: "playback", level: .info)
+                } catch {
+                    DiagnosticsLogger.error("身份自愈失败: \(error.localizedDescription)", category: "playback")
+                    break
+                }
+            }
         }
         landpageActive = false
 
-        // ③ bookmall 兜底（landpage 失败时才有内容可看）
+        // bookmall 兜底（3 个身份全被拒才有内容可看）
         do {
             var allItems: [DramaItem] = []
             let tabSnapshot = feedTabTypes
@@ -172,6 +181,16 @@ final class PlaybackEngine {
                 let added = merge(batch)
                 DiagnosticsLogger.log("追加 feed(landpage offset=\(feedOffset)) +\(added.count) 条，总计 \(items.count)",
                                       category: "playback", level: .info)
+                if added.isEmpty {
+                    // 翻页返空：身份可能中途被拒，自愈一次后重试首页
+                    try? await DeviceRegisterService.shared.reregister()
+                    let fresh = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+                    feedOffset = fresh.nextOffset
+                    feedSessionId = fresh.sessionId
+                    feedExhausted = !fresh.hasMore
+                    let added2 = merge(fresh.items)
+                    DiagnosticsLogger.log("landpage 中途被拒 → 自愈换身份重试 +\(added2.count) 条", category: "playback", level: .info)
+                }
             } catch {
                 DiagnosticsLogger.warn("landpage 翻页失败: \(error.localizedDescription)", category: "playback")
             }

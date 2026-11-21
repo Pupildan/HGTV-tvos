@@ -156,6 +156,19 @@ public final class DeviceRegisterService: @unchecked Sendable {
         // 下次 ensureRegistered 会重新 seed。
     }
 
+    /// 身份自愈（原 app 机制真机实锤：被拒 → rebuilding → 换新身份重试）。
+    /// 强制清掉当前身份并重新注册一个全新的，返回后调用方立即用新身份重试。
+    public func reregister() async throws {
+        reset()
+        // 用空身份 seed，让 isRegistered 变 false，ensureRegistered 才会真正重注册
+        registrar.seed(SignContext(
+            deviceID: "", deviceToken: "", installID: "",
+            versionCode: "74332", versionName: "7.4.3.32",
+            osVersion: "16", deviceType: "25053RT47C", romVersion: "BP2A.250605.031.A3"
+        ))
+        try await ensureRegistered()
+    }
+
     // MARK: - 持久化（跨启动恢复设备身份，对应原「重装恢复」）
     private static func loadRegistration() -> DeviceRegistration? {
         guard let data = UserDefaults.standard.data(forKey: DeviceRegistrar.persistenceKey) else { return nil }
