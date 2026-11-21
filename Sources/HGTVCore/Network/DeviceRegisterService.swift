@@ -93,7 +93,10 @@ public final class DeviceRegisterService: @unchecked Sendable {
     /// 成功后用全新身份（device_id/token/store-region cookie）更新签名凭证并持久化。
     /// 真实注册失败时回退旧占位流程，保证 App 可用。
     public func ensureRegistered() async throws {
-        if isRegistered {
+        // 只有「已注册且完整身份凭证存在」才跳过；老版本只持久化了 registration
+        //（缺 cdid/openudid/clientudid），凭证不完整必须重新走真实注册，否则 query
+        // 里会混用旧指纹 → 个性化接口拒绝。
+        if isRegistered, store.data(forKey: keyIdentity) != nil {
             DiagnosticsLogger.info("设备已注册，跳过", category: "device",
                                    meta: ["device_id": registrar.registration?.deviceID ?? "",
                                           "install_id": registrar.registration?.installID ?? ""])
