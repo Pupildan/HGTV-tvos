@@ -37,8 +37,9 @@ public final class DeviceRegisterService: @unchecked Sendable {
         store.string(forKey: keySession) != nil
     }
 
-    /// 确保已注册。未注册则发起 device_register（走签名拦截器）。
-    /// 签名占位阶段此请求会被服务端拒，但流程与接口已对齐原 APK。
+    /// 确保已注册。优先走真实 device_register（金标准配方，本网络实测成功）；
+    /// 成功后用全新身份（device_id/token/store-region cookie）更新签名凭证并持久化。
+    /// 真实注册失败时回退旧占位流程，保证 App 可用。
     public func ensureRegistered() async throws {
         if isRegistered {
             DiagnosticsLogger.info("设备已注册，跳过", category: "device",
@@ -46,6 +47,59 @@ public final class DeviceRegisterService: @unchecked Sendable {
                                           "install_id": registrar.registration?.installID ?? ""])
             return
         }
+        // —— 真实注册（金标准 v2 配方）——
+        do {
+            let id = try await RealDeviceRegister.register()
+            let context = SignContext(
+                deviceID: id.deviceID,
+                deviceToken: id.deviceToken,
+                installID: id.installID,
+                versionCode: "74332",
+                versionName: "7.4.3.32",
+                osVersion: "16",
+                deviceType: "25053RT47C",
+                romVersion: "BP2A.250605.031.A3"
+            )
+            registrar.seed(context: context)
+            let response = DeviceRegisterResponse(
+                deviceID: id.deviceID, iid: id.installID, installID: id.installID,
+                deviceToken: id.deviceToken, klinkEgdi: id.klinkEgdi,
+                cookies: ["store-region": id.storeRegion]
+            )
+            _ = registrar.apply(response, to: context)
+            Self.persistRegistration(registrar.registration)
+
+            // 凭证同步进拦截器（V5 device dict + query device_token + Cookie store-region）
+            interceptor.updateCredentials(AccountCredentials(
+                cookie: "store-region=\(id.storeRegion)",
+                token: id.deviceToken,
+                tsSign: "",
+                deviceId: id.deviceID,
+                installId: id.installID,
+                cdid: id.cdid,
+                openudid: id.openudid,
+                expiresAt: 0,
+                device: ["klink_egdi": id.klinkEgdi,
+                         "rom_version": "BP2A.250605.031.A3",
+                         "rom": "BP2A.250605.031.A3",
+                         "device_type": "25053RT47C",
+                         "device_brand": "Redmi",
+                         "carrier": "CHINA MOBILE",
+                         "channel": "69310258a",
+                         "store_region": id.storeRegion]
+            ))
+            DiagnosticsLogger.info("真实注册成功", category: "device", meta: [
+                "device_id": id.deviceID,
+                "install_id": id.installID,
+                "token_len": "\(id.deviceToken.count)",
+                "store_region": id.storeRegion,
+            ])
+            return
+        } catch {
+            DiagnosticsLogger.warn("真实注册失败，回退占位流程: \(error.localizedDescription)", category: "device")
+        }
+
+        // —— 旧占位流程（回退）——
         let context = SignContext(
             deviceID: registrar.registration?.deviceID ?? "",
             deviceToken: registrar.registration?.deviceToken ?? "",
