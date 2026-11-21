@@ -25,19 +25,19 @@ import CryptoKit
 @inline(__always) func kInv64(_ v: Int64) -> Int64 { ~v }
 // Swift stdlib 无 rotate（在 swift-numerics 包里），这里用移位实现（n 取位宽模，支持负数=反向）。
 @inline(__always) func krotl32(_ v: Int32, _ n: Int32) -> Int32 {
-    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    let u = UInt32(bitPattern: v); let k = UInt32(bitPattern: n) & 31
     return Int32(bitPattern: (u << k) | (u >> ((32 - k) & 31)))
 }
 @inline(__always) func kror32(_ v: Int32, _ n: Int32) -> Int32 {
-    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    let u = UInt32(bitPattern: v); let k = UInt32(bitPattern: n) & 31
     return Int32(bitPattern: (u >> k) | (u << ((32 - k) & 31)))
 }
 @inline(__always) func krotl64(_ v: Int64, _ n: Int64) -> Int64 {
-    let u = UInt64(bitPattern: v); let k = UInt64(n) & 63
+    let u = UInt64(bitPattern: v); let k = UInt64(bitPattern: n) & 63
     return Int64(bitPattern: (u << k) | (u >> ((64 - k) & 63)))
 }
 @inline(__always) func kror64(_ v: Int64, _ n: Int64) -> Int64 {
-    let u = UInt64(bitPattern: v); let k = UInt64(n) & 63
+    let u = UInt64(bitPattern: v); let k = UInt64(bitPattern: n) & 63
     return Int64(bitPattern: (u >> k) | (u << ((64 - k) & 63)))
 }
 
@@ -137,11 +137,11 @@ func hcXor(_ a: [UInt8], _ b: [UInt8]) -> [UInt8] {
     (0..<a.count).map { a[$0] ^ b[$0 % b.count] }
 }
 func hcRol(_ v: Int32, _ n: Int32) -> Int32 {
-    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    let u = UInt32(bitPattern: v); let k = UInt32(bitPattern: n) & 31
     return Int32(bitPattern: (u << k) | (u >> ((32 - k) & 31)))
 }
 func hcRor(_ v: Int32, _ n: Int32) -> Int32 {
-    let u = UInt32(bitPattern: v); let k = UInt32(n) & 31
+    let u = UInt32(bitPattern: v); let k = UInt32(bitPattern: n) & 31
     return Int32(bitPattern: (u >> k) | (u << ((32 - k) & 31)))
 }
 

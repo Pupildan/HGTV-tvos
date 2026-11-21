@@ -387,7 +387,7 @@ private func hcMedusaTable64(_ input: [UInt8], timestamp: Int32, profile: HCTabl
     let rotation = timestamp &+ profile.rotation
     // Kotlin Long.rotateLeft(v & 0xFFFFFFFF, -rotation) = 右转 rotation&63
     let u = (UInt64(bitPattern: Int64(timestamp)) & 0xFFFFFFFF)
-    let k = UInt64(rotation) & 63
+    let k = UInt64(bitPattern: rotation) & 63
     let initial: UInt64 = (u >> k) | (u << ((64 - k) & 63))
     var state = [Int64](repeating: Int64(bitPattern: initial), count: 8)
     var constants = [Int64](repeating: 0, count: 10)
