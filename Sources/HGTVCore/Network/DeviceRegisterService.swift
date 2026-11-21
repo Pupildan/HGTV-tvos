@@ -161,7 +161,7 @@ public final class DeviceRegisterService: @unchecked Sendable {
     public func reregister() async throws {
         reset()
         // 用空身份 seed，让 isRegistered 变 false，ensureRegistered 才会真正重注册
-        registrar.seed(SignContext(
+        registrar.seed(context: SignContext(
             deviceID: "", deviceToken: "", installID: "",
             versionCode: "74332", versionName: "7.4.3.32",
             osVersion: "16", deviceType: "25053RT47C", romVersion: "BP2A.250605.031.A3"
