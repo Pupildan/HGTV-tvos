@@ -15,7 +15,7 @@ enum RealDeviceRegister {
     static let path = "/service/2/device_register/"
     static let magic: [UInt8] = [0x74, 0x63, 0x05, 0x10, 0x00, 0x00]
     /// F0.smali b:[B（e1.y hex 解码）—— KDF 盐
-    static let kdfSalt: [UInt8] = Array<UInt8>(hex: "4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58")
+    static let kdfSalt: [UInt8] = hexBytes("4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58")
 
     // MARK: - 结果
 
@@ -173,11 +173,23 @@ enum RealDeviceRegister {
     }
 }
 
-private extension Array where Element == UInt8 {
-    init(hex: String) {
-        let chars = Array(hex)
-        self = stride(from: 0, to: chars.count - 1, by: 2).map {
-            UInt8(String(chars[$0]) + String(chars[$0 + 1]), radix: 16) ?? 0
-        }
+private func hexNibble(_ c: UInt8) -> UInt8 {
+    switch c {
+    case 0x30...0x39: return c - 0x30          // 0-9
+    case 0x61...0x66: return c - 0x61 + 10     // a-f
+    case 0x41...0x46: return c - 0x41 + 10     // A-F
+    default: return 0
     }
+}
+
+private func hexBytes(_ hex: String) -> [UInt8] {
+    let c = Array(hex.utf8)
+    var out = [UInt8]()
+    out.reserveCapacity(c.count / 2)
+    var i = 0
+    while i + 1 < c.count {
+        out.append(hexNibble(c[i]) << 4 | hexNibble(c[i + 1]))
+        i += 2
+    }
+    return out
 }
