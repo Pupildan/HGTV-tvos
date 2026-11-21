@@ -112,10 +112,17 @@ public final class SignInterceptor: @unchecked Sendable {
         //    openudid/cdid/clientudid 用注册时的同一组值（覆盖 CommonParams 里的旧硬编码），
         //    device_id 与身份指纹一致是个性化接口的硬要求。
         if !credentials.token.isEmpty { merged["device_token"] = credentials.token }
-        for key in ["openudid", "cdid", "clientudid", "klink_egdi", "rom", "rom_version",
-                    "carrier", "mcc_mnc", "apk_first_install_time", "profile-format",
-                    "openudid-source"] {
-            if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
+        if landpageFamily {
+            // landpage：应用全部身份档案键（抓包 #2 实锤 query 携带全套档案，
+            // 含 device_type/brand/resolution/dpi/rom/carrier/mcc_mnc 等；
+            // 预置身份切换时三星档案随身份整体替换）
+            for (k, v) in credentials.device where !v.isEmpty { merged[k] = v }
+        } else {
+            for key in ["openudid", "cdid", "clientudid", "klink_egdi", "rom", "rom_version",
+                        "carrier", "mcc_mnc", "apk_first_install_time", "profile-format",
+                        "openudid-source"] {
+                if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
+            }
         }
         if landpageFamily {
             // 抓包实锤：原版 landpage query 不带 install_id
@@ -128,7 +135,11 @@ public final class SignInterceptor: @unchecked Sendable {
             // V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
             // appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
             // V5 任一环节降级返回 nil 时，回退到旧 XGorgon 签名器，保证 App 不 crash、请求照发。
-            let deviceOverride = landpageFamily ? HCVendor5.landpageDevice : (appFamily ? HCVendor5.appDevice : nil)
+            var deviceOverride = landpageFamily ? HCVendor5.landpageDevice : (appFamily ? HCVendor5.appDevice : nil)
+            if landpageFamily, !credentials.device.isEmpty, let base = deviceOverride {
+                // 预置身份（三星档案）整体覆盖族默认（Redmi）——UA/medusa 同步随身份切换
+                deviceOverride = base.merging(credentials.device) { _, new in new }
+            }
             v5Lock.lock()
             let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
             v5Lock.unlock()

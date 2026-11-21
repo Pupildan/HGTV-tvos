@@ -32,6 +32,7 @@ public final class DeviceRegisterService: @unchecked Sendable {
         var openudid: String = ""
         var clientudid: String = ""
         var apkFirstInstallTime: Int64 = 0
+        var cookieHeader: String = ""
     }
 
     private init() {
@@ -52,8 +53,37 @@ public final class DeviceRegisterService: @unchecked Sendable {
 
     /// 把身份凭证写入拦截器（V5 device dict + query 全身份）。
     private func applyIdentity(_ id: StoredIdentity) {
+        let isPreset = !id.cookieHeader.isEmpty
+        let cookieValue = id.cookieHeader.isEmpty ? "store-region=\(id.storeRegion)" : id.cookieHeader
+        var dev = ["klink_egdi": id.klinkEgdi,
+                   "openudid": id.openudid,
+                   "cdid": id.cdid,
+                   "clientudid": id.clientudid,
+                   "rom_version": "BP2A.250605.031.A3",
+                   "rom": "A3",
+                   "device_type": "25053RT47C",
+                   "device_brand": "Redmi",
+                   "carrier": "CHINA MOBILE",
+                   "mcc_mnc": "46000",
+                   "openudid-source": "android_id",
+                   "profile-format": "official-v1",
+                   "channel": "69310258a",
+                   "store_region": id.storeRegion]
+        if String(id.apkFirstInstallTime) != "0" {
+            dev["apk_first_install_time"] = String(id.apkFirstInstallTime)
+        }
+        if isPreset {
+            // 预置身份=原版三星档案，query/V5 dict 全套随身份切换
+            for (k, v) in RealDeviceRegister.presetProfile where k != "apk_first_install_time_marker" {
+                dev[k] = v
+            }
+            if !id.cdid.isEmpty { dev["cdid"] = id.cdid }
+            if !id.openudid.isEmpty { dev["openudid"] = id.openudid }
+            if !id.clientudid.isEmpty { dev["clientudid"] = id.clientudid }
+            if id.apkFirstInstallTime != 0 { dev["apk_first_install_time"] = String(id.apkFirstInstallTime) }
+        }
         interceptor.updateCredentials(AccountCredentials(
-            cookie: "store-region=\(id.storeRegion)",
+            cookie: cookieValue,
             token: id.deviceToken,
             tsSign: "",
             deviceId: id.deviceID,
@@ -141,7 +171,8 @@ public final class DeviceRegisterService: @unchecked Sendable {
                 cdid: id.cdid,
                 openudid: id.openudid,
                 clientudid: id.clientudid,
-                apkFirstInstallTime: id.apkFirstInstallTime
+                apkFirstInstallTime: id.apkFirstInstallTime,
+                cookieHeader: id.cookieHeader
             ))
             DiagnosticsLogger.info("真实注册成功", category: "device", meta: [
                 "device_id": id.deviceID,
@@ -210,6 +241,27 @@ public final class DeviceRegisterService: @unchecked Sendable {
         store.removeObject(forKey: keyIdentity)
         // registration 由 DeviceRegistrar 内部管理，此处仅清持久化；
         // 下次 ensureRegistered 会重新 seed。
+    }
+
+    /// 应用预置身份（原版「多设备身份切换」池）。写入凭证+持久化，返回是否成功。
+    @discardableResult
+    public func applyPresetIdentity(_ index: Int) -> Bool {
+        guard index >= 0, index < RealDeviceRegister.presetIdentities.count else { return false }
+        let id = RealDeviceRegister.presetIdentities[index]
+        saveIdentity(StoredIdentity(
+            deviceID: id.deviceID,
+            installID: id.installID,
+            deviceToken: id.deviceToken,
+            klinkEgdi: id.klinkEgdi,
+            storeRegion: id.storeRegion,
+            cdid: id.cdid,
+            openudid: id.openudid,
+            clientudid: id.clientudid,
+            apkFirstInstallTime: id.apkFirstInstallTime,
+            cookieHeader: id.cookieHeader
+        ))
+        DiagnosticsLogger.info("切换到预置身份#\(index) device_id=\(id.deviceID)", category: "device")
+        return true
     }
 
     /// 身份自愈（原 app 机制真机实锤：被拒 → rebuilding → 换新身份重试）。

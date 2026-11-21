@@ -29,7 +29,57 @@ enum RealDeviceRegister {
         let openudid: String
         let clientudid: String
         let apkFirstInstallTime: Int64
+        /// Cookie 头完整值（预置身份用；新注册为 store-region=...）
+        var cookieHeader: String = ""
     }
+
+    // MARK: - 预置身份池（原版「多设备身份切换」机制）
+    //
+    // 身份 A：原版 app 会话镜像（hgtv-session-4.json，长龄身份，WiFi 下出过 feed 内容）
+    // 身份 B：真机抓包 00:38:20 landpage 成功请求所用的全身份（流量网络）
+    // 每个预置身份携带自己的完整三星档案——query/V5 device dict/UA 全套随之切换。
+
+    static let presetIdentities: [Identity] = [
+        Identity(
+            deviceID: "1290207924645523",
+            installID: "1290207924649619",
+            deviceToken: "AAA7T7NFJGA5NDYL3RSQ23JVCGLY4UWL2MTTGVKDDJ66MW64TTEBP6XR5XEBJ5DFGZ3T7RUISATOZQC4I56IH4EP4NP7KBQWT675NT2WASA3E6RVGO5BXUGIPNAVISNZTDJEB4PSWXSTA6URIWIMPNA",
+            klinkEgdi: "AAIMvCd7m9xGnX_w0hwf-8CVdY3CvJd88f-TnF_4d103EYSW1en5mtcN",
+            storeRegion: "cn-zj",
+            cdid: "f77fc328-9e84-4189-bc97-60a295c58249",
+            openudid: "4fea0f9308e38d43",
+            clientudid: "416f820f-5179-49a6-8df9-2c17f30418c4",
+            apkFirstInstallTime: 1795101759185,
+            cookieHeader: "install_id=1290207924649619; store-region=cn-zj; ttreq=1$f2adb9f9171223811b67eb0e3e68ba76e214a43e; store-region-src=did"
+        ),
+        Identity(
+            deviceID: "1642051663562816",
+            installID: "1642051663566912",
+            deviceToken: "AAAQQXI6MAI6UWSOORMFGG47ZKQYU5HQUX2MNH2UUEMLEVWPM2YR53LOA3RLTVXPFBWX24DTOFILZYUB3RIT7IIAQDCA6ZZFE5BSDN2XLBDN4GHE76NN6HG553VIURIMCYOBOANOZVJM572VKIUE6FA",
+            klinkEgdi: "AAKC3PLVsVy7yEHcT5VfBF0AyK_V9_247B80nd9WgSxiYs5RmjkdU-So",
+            storeRegion: "cn-zj",
+            cdid: "2541aee9-7df2-4be1-8d32-ce1976da00ab",
+            openudid: "4fea0f9308e38d43",
+            clientudid: "16c5281f-12c7-42d2-9612-37f096a41300",
+            apkFirstInstallTime: 1795105798067,
+            cookieHeader: "install_id=1642051663566912; store-region=cn-zj; store-region-src=did"
+        ),
+    ]
+
+    /// 预置身份的完整三星档案（query/V5 dict 共用；与对应 device_id 注册时一致）
+    static let presetProfile: [String: String] = [
+        "device_type": "SM-F7310",
+        "device_brand": "samsung",
+        "resolution": "2546*1080",
+        "dpi": "480",
+        "rom_version": "BP4A.251205.006.F7310ZCS9GZF1",
+        "rom": "F7310ZCS9GZF1",
+        "carrier": "中国电信",
+        "mcc_mnc": "46011",
+        "openudid-source": "android_id",
+        "profile-format": "official-v1",
+        "apk_first_install_time_marker": "1",
+    ]
 
     // MARK: - ttEncrypt 信封
 
@@ -176,7 +226,8 @@ enum RealDeviceRegister {
         return Identity(deviceID: did, installID: iid, deviceToken: token,
                         klinkEgdi: egdi, storeRegion: region, cdid: cdid,
                         openudid: openudid, clientudid: clientudid,
-                        apkFirstInstallTime: nowMs)
+                        apkFirstInstallTime: nowMs,
+                        cookieHeader: "store-region=\(region)")
     }
 }
 

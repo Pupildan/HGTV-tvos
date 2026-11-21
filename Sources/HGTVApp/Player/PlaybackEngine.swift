@@ -84,53 +84,66 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：landpage 正确池子 + 身份自愈（原 app 机制：被拒 → rebuilding → 换新身份重试）。
-    /// 最多 3 个身份轮换；全部被拒才 bookmall 兜底。
+    /// 首次加载：landpage 正确池子 + 多身份切换（原 app 机制）。
+    /// 轮换顺序：预置身份池（原版镜像/抓包实证身份）→ 全新注册自愈（最多 3 个）。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            try await DeviceRegisterService.shared.ensureRegistered()
-        } catch {
-            DiagnosticsLogger.warn("注册未就绪仍继续: \(error.localizedDescription)", category: "playback")
+        let presetCount = RealDeviceRegister.presetIdentities.count
+        // 预置身份池轮换
+        for i in 0..<presetCount {
+            DeviceRegisterService.shared.applyPresetIdentity(i)
+            if let page = tryLandpageOnce(tag: "预置#\(i)") {
+                finishLoad(page, source: "landpage 预置#\(i)")
+                return
+            }
+        }
+        // 全新注册自愈（原 app：被拒 → rebuilding → 换新身份）
+        for attempt in 1...2 {
+            do {
+                try await DeviceRegisterService.shared.reregister()
+            } catch {
+                DiagnosticsLogger.error("身份自愈失败: \(error.localizedDescription)", category: "playback")
+                break
+            }
+            if let page = tryLandpageOnce(tag: "新注册#\(attempt)") {
+                finishLoad(page, source: "landpage 新注册#\(attempt)")
+                return
+            }
         }
 
-        // 身份自愈轮换：landpage 返空 = 当前身份被拒 → 换新身份重试（原 app 机制）
-        for attempt in 1...3 {
-            do {
-                let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+        // 无兜底：landpage 失败直接显示错误（干净测试，不进旧池子）
+        errorMessage = "landpage 未接通（预置 2 身份 + 2 新注册身份均被拒）"
+        DiagnosticsLogger.error("首批 feed：landpage 全部身份失败，无兜底", category: "playback")
+    }
+
+    /// 尝试一次 landpage（首页）；成功返回页数据。
+    private func tryLandpageOnce(tag: String) -> APIService.LandpagePage? {
+        do {
+            let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+            if !page.items.isEmpty {
                 feedOffset = page.nextOffset
                 feedSessionId = page.sessionId
                 feedExhausted = !page.hasMore
-                let added = merge(page.items)
-                if !added.isEmpty {
-                    landpageActive = page.hasMore || !page.items.isEmpty
-                    hasLoaded = true; errorMessage = nil
-                    DiagnosticsLogger.log("首批 feed：landpage 正确池子 \(added.count) 条（身份#\(attempt)）session=\(feedSessionId)",
-                                          category: "playback", level: .info)
-                    return
-                }
-                DiagnosticsLogger.warn("landpage 身份#\(attempt) 返 0 条 → 视为身份被拒", category: "playback")
-            } catch {
-                DiagnosticsLogger.warn("landpage 身份#\(attempt) 失败: \(error.localizedDescription)", category: "playback")
+                landpageActive = page.hasMore || !page.items.isEmpty
+                return page
             }
-            if attempt < 3 {
-                do {
-                    try await DeviceRegisterService.shared.reregister()
-                    DiagnosticsLogger.log("身份自愈：已重建新身份（第 \(attempt) 次切换），重试 landpage", category: "playback", level: .info)
-                } catch {
-                    DiagnosticsLogger.error("身份自愈失败: \(error.localizedDescription)", category: "playback")
-                    break
-                }
-            }
+            DiagnosticsLogger.warn("landpage \(tag) 返 0 条", category: "playback")
+        } catch {
+            DiagnosticsLogger.warn("landpage \(tag) 失败: \(error.localizedDescription)", category: "playback")
         }
-        landpageActive = false
+        return nil
+    }
 
-        // 无兜底：landpage 失败直接显示错误（干净测试，不进旧池子）
-        errorMessage = "landpage 未接通（3 个身份均被拒或返空）"
-        DiagnosticsLogger.error("首批 feed：landpage 3 个身份全部失败，无兜底", category: "playback")
+    private func finishLoad(_ page: APIService.LandpagePage, source: String) {
+        let added = merge(page.items)
+        if !added.isEmpty {
+            hasLoaded = true; errorMessage = nil
+            DiagnosticsLogger.log("首批 feed：\(source) 成功 \(added.count) 条 session=\(feedSessionId)",
+                                  category: "playback", level: .info)
+        }
     }
 
     /// 无限 feed：landpage 翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
