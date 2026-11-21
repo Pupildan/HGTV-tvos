@@ -18,6 +18,20 @@ public final class DeviceRegisterService: @unchecked Sendable {
 
     private let store = UserDefaults.standard
     private let keySession = "hgtv.session"
+    /// 完整身份凭证持久化（cdid/openudid/clientudid 等 DeviceRegistration 不含的字段）。
+    /// 没有它，重启后拦截器凭证为空 → 所有请求回退旧硬编码身份 → 个性化接口拒绝。
+    private let keyIdentity = "HGTV.identity.credentials"
+
+    private struct StoredIdentity: Codable {
+        var deviceID: String = ""
+        var installID: String = ""
+        var deviceToken: String = ""
+        var klinkEgdi: String = ""
+        var storeRegion: String = ""
+        var cdid: String = ""
+        var openudid: String = ""
+        var clientudid: String = ""
+    }
 
     private init() {
         let s = RequestSigner()
@@ -27,6 +41,44 @@ public final class DeviceRegisterService: @unchecked Sendable {
         let r = DeviceRegistrar(signer: s, initial: restored)
         self.registrar = r
         self.interceptor = SignInterceptor(signer: s, registrar: r)
+        // —— 恢复完整身份凭证到拦截器（关键：否则重启后 query 用旧硬编码身份）——
+        if let data = store.data(forKey: keyIdentity),
+           let id = try? JSONDecoder().decode(StoredIdentity.self, from: data) {
+            applyIdentity(id)
+            DiagnosticsLogger.info("已恢复注册身份凭证", category: "device", meta: ["device_id": id.deviceID])
+        }
+    }
+
+    /// 把身份凭证写入拦截器（V5 device dict + query 全身份）。
+    private func applyIdentity(_ id: StoredIdentity) {
+        interceptor.updateCredentials(AccountCredentials(
+            cookie: "store-region=\(id.storeRegion)",
+            token: id.deviceToken,
+            tsSign: "",
+            deviceId: id.deviceID,
+            installId: id.installID,
+            cdid: id.cdid,
+            openudid: id.openudid,
+            expiresAt: 0,
+            device: ["klink_egdi": id.klinkEgdi,
+                     "openudid": id.openudid,
+                     "cdid": id.cdid,
+                     "clientudid": id.clientudid,
+                     "rom_version": "BP2A.250605.031.A3",
+                     "rom": "BP2A.250605.031.A3",
+                     "device_type": "25053RT47C",
+                     "device_brand": "Redmi",
+                     "carrier": "CHINA MOBILE",
+                     "channel": "69310258a",
+                     "store_region": id.storeRegion]
+        ))
+    }
+
+    private func saveIdentity(_ id: StoredIdentity) {
+        if let data = try? JSONEncoder().encode(id) {
+            store.set(data, forKey: keyIdentity)
+        }
+        applyIdentity(id)
     }
 
     public var isRegistered: Bool {
@@ -69,29 +121,18 @@ public final class DeviceRegisterService: @unchecked Sendable {
             _ = registrar.apply(response, to: context)
             Self.persistRegistration(registrar.registration)
 
-            // 凭证同步进拦截器（V5 device dict + query 全身份覆盖旧硬编码值 + Cookie store-region）
+            // 凭证持久化 + 同步进拦截器（V5 device dict + query 全身份覆盖旧硬编码值）
             // 关键：openudid/cdid/clientudid 必须用注册 payload 里的同一组值，否则
             // device_id 与身份指纹不匹配，landpage 等个性化接口会拒绝。
-            interceptor.updateCredentials(AccountCredentials(
-                cookie: "store-region=\(id.storeRegion)",
-                token: id.deviceToken,
-                tsSign: "",
-                deviceId: id.deviceID,
-                installId: id.installID,
+            saveIdentity(StoredIdentity(
+                deviceID: id.deviceID,
+                installID: id.installID,
+                deviceToken: id.deviceToken,
+                klinkEgdi: id.klinkEgdi,
+                storeRegion: id.storeRegion,
                 cdid: id.cdid,
                 openudid: id.openudid,
-                expiresAt: 0,
-                device: ["klink_egdi": id.klinkEgdi,
-                         "openudid": id.openudid,
-                         "cdid": id.cdid,
-                         "clientudid": id.clientudid,
-                         "rom_version": "BP2A.250605.031.A3",
-                         "rom": "BP2A.250605.031.A3",
-                         "device_type": "25053RT47C",
-                         "device_brand": "Redmi",
-                         "carrier": "CHINA MOBILE",
-                         "channel": "69310258a",
-                         "store_region": id.storeRegion]
+                clientudid: id.clientudid
             ))
             DiagnosticsLogger.info("真实注册成功", category: "device", meta: [
                 "device_id": id.deviceID,
@@ -157,6 +198,7 @@ public final class DeviceRegisterService: @unchecked Sendable {
     public func reset() {
         store.removeObject(forKey: keySession)
         store.removeObject(forKey: DeviceRegistrar.persistenceKey)
+        store.removeObject(forKey: keyIdentity)
         // registration 由 DeviceRegistrar 内部管理，此处仅清持久化；
         // 下次 ensureRegistered 会重新 seed。
     }
