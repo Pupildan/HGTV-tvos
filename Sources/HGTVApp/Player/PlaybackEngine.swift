@@ -121,18 +121,30 @@ final class PlaybackEngine {
             DiagnosticsLogger.warn("② bookmall+V5 失败: \(error.localizedDescription)", category: "playback")
         }
 
-        // ③ bookmall + 旧签名器（v36 已验证保底）
+        // ③ bookmall + 旧签名器（v36 已验证保底）。
+        // 并发抽干内容池：3 tab × 5 轮（v50 实测首批只拿 19 条就 plateau，池上限 ~50）。
         do {
             var allItems: [DramaItem] = []
-            for tab in feedTabTypes {
-                let groups = try await APIService.shared.fetchHome(tabType: tab, legacy: true)
-                allItems.append(contentsOf: groups.flatMap { $0.items ?? [] })
+            let tabSnapshot = feedTabTypes
+            let requestCount = tabSnapshot.count * 5   // 15 次请求（3 tab × 5 轮）
+            try await withThrowingTaskGroup(of: [DramaItem].self) { group in
+                for i in 0..<requestCount {
+                    let tab = tabSnapshot[i % tabSnapshot.count]
+                    group.addTask {
+                        let groups = try await APIService.shared.fetchHome(tabType: tab, legacy: true)
+                        return groups.flatMap { $0.items ?? [] }
+                    }
+                }
+                for try await batch in group {
+                    allItems.append(contentsOf: batch)
+                }
             }
             allItems.shuffle()
+            feedTabCursor = Int.random(in: 0..<max(1, tabSnapshot.count))
             let added = merge(allItems)
             if !added.isEmpty {
                 hasLoaded = true; errorMessage = nil
-                DiagnosticsLogger.log("首批 feed：③ bookmall+legacy 保底成功 \(added.count) 条", category: "playback", level: .info)
+                DiagnosticsLogger.log("首批 feed：③ bookmall+legacy 保底成功 \(added.count) 条（15 请求抽干池）", category: "playback", level: .info)
                 return
             }
             errorMessage = "暂无推荐内容"
