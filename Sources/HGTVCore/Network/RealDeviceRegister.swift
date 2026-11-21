@@ -19,18 +19,18 @@ public enum RealDeviceRegister {
 
     // MARK: - 结果
 
-    struct Identity {
-        let deviceID: String
-        let installID: String
-        let deviceToken: String
-        let klinkEgdi: String
-        let storeRegion: String   // 如 "cn-zj"
-        let cdid: String
-        let openudid: String
-        let clientudid: String
-        let apkFirstInstallTime: Int64
+    public struct Identity {
+        public let deviceID: String
+        public let installID: String
+        public let deviceToken: String
+        public let klinkEgdi: String
+        public let storeRegion: String   // 如 "cn-zj"
+        public let cdid: String
+        public let openudid: String
+        public let clientudid: String
+        public let apkFirstInstallTime: Int64
         /// Cookie 头完整值（预置身份用；新注册为 store-region=...）
-        var cookieHeader: String = ""
+        public var cookieHeader: String = ""
     }
 
     // MARK: - 预置身份池（原版「多设备身份切换」机制）
