@@ -39,12 +39,15 @@ func hcMedusaCore(_ input: [UInt8], selector: Int32, timestamp: Int64) -> [UInt8
 
 /** Go medusaTail:16 字节摘要后追加 4 字节校验。 */
 func hcMedusaTail(_ core: [UInt8], checks: HCDigestChecks) -> [UInt8] {
+    V5CrashBreadcrumbs.mark("🔬 tail 开始 coreLen=\(core.count)")
     var out = [UInt8](repeating: 0, count: 20)
     for i in 0..<16 { out[i] = core[i] }
     let eight = checks.exception == 1 || checks.loader == 1 ||
         (UInt64(bitPattern: checks.unH) == 0xf6590850)
     let n = eight ? 8 : 12
+    V5CrashBreadcrumbs.mark("🔬 tail AP 前 n=\(n)")
     let ap = hcMedusaAP(Array(core[0..<n]), initial: 0x20220420, 7, 3, 11, 5)
+    V5CrashBreadcrumbs.mark("🔬 tail AP 后")
     for i in 0..<4 {
         out[16 + i] = UInt8(truncatingIfNeeded: kshr64(ap, Int64(i * 8)) & 0xFF)
     }
@@ -232,6 +235,7 @@ private func hcMedusaMix32(_ input: [UInt8], timestamp: Int32, profile: HCMix32P
         block[52+i] = UInt8(truncatingIfNeeded: hcRotl8(Int32(hcMedusaMix32Padding[i]), -(rotation &+ 2)))
     }
     hcputU64BE(&block, 56, 52 * 8)
+    V5CrashBreadcrumbs.mark("🔬 mix32 block 完成")
     var message = [Int32](repeating: 0, count: 128)
     for i in 0..<16 { message[i] = hcu32BE(block, i * 4) }
     for i in 16..<128 {
@@ -242,6 +246,7 @@ private func hcMedusaMix32(_ input: [UInt8], timestamp: Int32, profile: HCMix32P
         let sigma1 = krotl32(right, -17) ^ krotl32(right, -19) ^ kshr32(right, 10)
         message[i] = message[i-16] &+ sigma0 &+ message[i-7] &+ sigma1
     }
+    V5CrashBreadcrumbs.mark("🔬 mix32 message 完成")
     var initial = [Int32](repeating: 0, count: 8)
     // Kotlin Integer.rotateLeft(v, -rotation) = 右转 rotation&31
     for i in 0..<8 { initial[i] = kror32(hcMedusaMix32Initial[i], rotation & 31) }
@@ -265,8 +270,10 @@ private func hcMedusaMix32(_ input: [UInt8], timestamp: Int32, profile: HCMix32P
         following[Int(profile.sum2Target)] = sum1 &+ sum2
         state = following
     }
+    V5CrashBreadcrumbs.mark("🔬 mix32 state 完成")
     var encoded = [UInt8](repeating: 0, count: 32)
     for i in 0..<8 { hcputU32BE(&encoded, i * 4, state[i] &+ initial[i]) }
+    V5CrashBreadcrumbs.mark("🔬 mix32 fold 前")
     return hcMedusaFoldHalves(encoded)
 }
 
