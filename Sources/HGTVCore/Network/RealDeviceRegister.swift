@@ -47,7 +47,7 @@ enum RealDeviceRegister {
         out.reserveCapacity(body.count)
         for off in stride(from: 0, to: body.count, by: 16) {
             let blk = (0..<16).map { body[off + $0] ^ prev[$0] }
-            let enc = AESECB.ecbEncryptBlock(key: key, block: blk)
+            let enc = CENCDecryptor.ecbEncryptBlock(key: key, block: blk)
             out += enc
             prev = enc
         }
@@ -175,8 +175,9 @@ enum RealDeviceRegister {
 
 private extension Array where Element == UInt8 {
     init(hex: String) {
-        self = stride(from: 0, to: hex.count, by: 2).map {
-            UInt8(hex[$0..<hex.index($0, offsetBy: 2)], radix: 16) ?? 0
+        let chars = Array(hex)
+        self = stride(from: 0, to: chars.count - 1, by: 2).map {
+            UInt8(String(chars[$0]) + String(chars[$0 + 1]), radix: 16) ?? 0
         }
     }
 }
