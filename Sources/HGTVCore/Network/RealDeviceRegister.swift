@@ -28,6 +28,7 @@ enum RealDeviceRegister {
         let cdid: String
         let openudid: String
         let clientudid: String
+        let apkFirstInstallTime: Int64
     }
 
     // MARK: - ttEncrypt 信封
@@ -174,7 +175,8 @@ enum RealDeviceRegister {
         }
         return Identity(deviceID: did, installID: iid, deviceToken: token,
                         klinkEgdi: egdi, storeRegion: region, cdid: cdid,
-                        openudid: openudid, clientudid: clientudid)
+                        openudid: openudid, clientudid: clientudid,
+                        apkFirstInstallTime: nowMs)
     }
 }
 

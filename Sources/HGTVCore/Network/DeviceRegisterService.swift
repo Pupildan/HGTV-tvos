@@ -31,6 +31,7 @@ public final class DeviceRegisterService: @unchecked Sendable {
         var cdid: String = ""
         var openudid: String = ""
         var clientudid: String = ""
+        var apkFirstInstallTime: Int64 = 0
     }
 
     private init() {
@@ -64,8 +65,12 @@ public final class DeviceRegisterService: @unchecked Sendable {
                      "openudid": id.openudid,
                      "cdid": id.cdid,
                      "clientudid": id.clientudid,
+                     "openudid-source": "android_id",
+                     "profile-format": "official-v1",
+                     "mcc_mnc": "46000",
+                     "rom": "A3",
+                     "apk_first_install_time": String(id.apkFirstInstallTime),
                      "rom_version": "BP2A.250605.031.A3",
-                     "rom": "BP2A.250605.031.A3",
                      "device_type": "25053RT47C",
                      "device_brand": "Redmi",
                      "carrier": "CHINA MOBILE",
@@ -135,7 +140,8 @@ public final class DeviceRegisterService: @unchecked Sendable {
                 storeRegion: id.storeRegion,
                 cdid: id.cdid,
                 openudid: id.openudid,
-                clientudid: id.clientudid
+                clientudid: id.clientudid,
+                apkFirstInstallTime: id.apkFirstInstallTime
             ))
             DiagnosticsLogger.info("真实注册成功", category: "device", meta: [
                 "device_id": id.deviceID,

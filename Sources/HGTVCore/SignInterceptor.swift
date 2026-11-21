@@ -113,8 +113,13 @@ public final class SignInterceptor: @unchecked Sendable {
         //    device_id 与身份指纹一致是个性化接口的硬要求。
         if !credentials.token.isEmpty { merged["device_token"] = credentials.token }
         for key in ["openudid", "cdid", "clientudid", "klink_egdi", "rom", "rom_version",
-                    "carrier", "mcc_mnc", "apk_first_install_time", "profile-format"] {
+                    "carrier", "mcc_mnc", "apk_first_install_time", "profile-format",
+                    "openudid-source"] {
             if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
+        }
+        if landpageFamily {
+            // 抓包实锤：原版 landpage query 不带 install_id
+            merged.removeValue(forKey: "install_id")
         }
 
         // 3) 签名。legacySigning=true 或 V5 总开关关闭时直接走旧 XGorgon。
