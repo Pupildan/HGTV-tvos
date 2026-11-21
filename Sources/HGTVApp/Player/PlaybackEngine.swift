@@ -44,9 +44,6 @@ final class PlaybackEngine {
     var onFeedRestored: (() -> Void)?
 
     private var seenVids: Set<String> = []
-    /// bookmall 保底轮换（仅当 landpage 全层级失败才用）。
-    private let feedTabTypes: [Int] = [8, 38, 32]
-    private var feedTabCursor = 0
     /// landpage 翻页游标（成功接入后 loadMore 续页）。
     private var feedOffset = 0
     private var feedSessionId = ""
@@ -131,37 +128,9 @@ final class PlaybackEngine {
         }
         landpageActive = false
 
-        // bookmall 兜底（3 个身份全被拒才有内容可看）
-        do {
-            var allItems: [DramaItem] = []
-            let tabSnapshot = feedTabTypes
-            let requestCount = tabSnapshot.count * 5
-            try await withThrowingTaskGroup(of: [DramaItem].self) { group in
-                for i in 0..<requestCount {
-                    let tab = tabSnapshot[i % tabSnapshot.count]
-                    group.addTask {
-                        let groups = try await APIService.shared.fetchHome(tabType: tab, legacy: true)
-                        return groups.flatMap { $0.items ?? [] }
-                    }
-                }
-                for try await batch in group {
-                    allItems.append(contentsOf: batch)
-                }
-            }
-            allItems.shuffle()
-            feedTabCursor = Int.random(in: 0..<max(1, tabSnapshot.count))
-            let added = merge(allItems)
-            if !added.isEmpty {
-                hasLoaded = true; errorMessage = nil
-                DiagnosticsLogger.log("首批 feed：bookmall 兜底 \(added.count) 条", category: "playback", level: .info)
-                return
-            }
-            errorMessage = "暂无推荐内容"
-            DiagnosticsLogger.error("bookmall 兜底也为空", category: "playback")
-        } catch {
-            errorMessage = error.localizedDescription
-            DiagnosticsLogger.error("首批 feed 全部失败: \(error.localizedDescription)", category: "playback")
-        }
+        // 无兜底：landpage 失败直接显示错误（干净测试，不进旧池子）
+        errorMessage = "landpage 未接通（3 个身份均被拒或返空）"
+        DiagnosticsLogger.error("首批 feed：landpage 3 个身份全部失败，无兜底", category: "playback")
     }
 
     /// 无限 feed：landpage 翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
@@ -196,17 +165,8 @@ final class PlaybackEngine {
             }
             return
         }
-        do {
-            let tab = feedTabTypes[feedTabCursor % feedTabTypes.count]
-            feedTabCursor += 1
-            let groups = try await APIService.shared.fetchHome(tabType: tab, legacy: true)
-            var batch = groups.flatMap { $0.items ?? [] }
-            batch.shuffle()
-            let added = merge(batch)
-            DiagnosticsLogger.log("追加 feed(tab=\(tab)) +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
-        } catch {
-            DiagnosticsLogger.warn("追加 feed 失败: \(error.localizedDescription)", category: "playback")
-        }
+        // landpage 未接通：无兜底，不加载任何旧池子内容
+        DiagnosticsLogger.warn("landpage 未接通，loadMore 跳过（无兜底）", category: "playback")
     }
 
     /// 合并去重：返回真正新增的条目。
