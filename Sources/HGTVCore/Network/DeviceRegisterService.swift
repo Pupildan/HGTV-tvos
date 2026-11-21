@@ -69,7 +69,9 @@ public final class DeviceRegisterService: @unchecked Sendable {
             _ = registrar.apply(response, to: context)
             Self.persistRegistration(registrar.registration)
 
-            // 凭证同步进拦截器（V5 device dict + query device_token + Cookie store-region）
+            // 凭证同步进拦截器（V5 device dict + query 全身份覆盖旧硬编码值 + Cookie store-region）
+            // 关键：openudid/cdid/clientudid 必须用注册 payload 里的同一组值，否则
+            // device_id 与身份指纹不匹配，landpage 等个性化接口会拒绝。
             interceptor.updateCredentials(AccountCredentials(
                 cookie: "store-region=\(id.storeRegion)",
                 token: id.deviceToken,
@@ -80,6 +82,9 @@ public final class DeviceRegisterService: @unchecked Sendable {
                 openudid: id.openudid,
                 expiresAt: 0,
                 device: ["klink_egdi": id.klinkEgdi,
+                         "openudid": id.openudid,
+                         "cdid": id.cdid,
+                         "clientudid": id.clientudid,
                          "rom_version": "BP2A.250605.031.A3",
                          "rom": "BP2A.250605.031.A3",
                          "device_type": "25053RT47C",

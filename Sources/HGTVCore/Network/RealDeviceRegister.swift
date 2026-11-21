@@ -27,6 +27,7 @@ enum RealDeviceRegister {
         let storeRegion: String   // 如 "cn-zj"
         let cdid: String
         let openudid: String
+        let clientudid: String
     }
 
     // MARK: - ttEncrypt 信封
@@ -62,15 +63,16 @@ enum RealDeviceRegister {
 
     // MARK: - 注册 payload（JSON 手工拼串，与金标准字节级一致）
 
-    static func buildPayloadJSON(nowMs: Int64) -> String {
+    static func buildPayloadJSON(nowMs: Int64) -> (json: String, cdid: String, openudid: String, clientudid: String) {
         let cdid = UUID().uuidString.lowercased()
         let openudid = String(UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(16))
         let clientudid = UUID().uuidString.lowercased()
         let reqID = UUID().uuidString.lowercased()
         // 手工拼 JSON（键序与金标准一致；红果显示名直接 UTF-8）
-        return """
+        let json = """
         {"magic_tag":"ss_app_log","header":{"display_name":"红果免费短剧","update_version_code":73532,"manifest_version_code":73532,"app_version_minor":"","aid":8662,"channel":"update_64","package":"com.phoenix.read","app_version":"7.3.5.32","version_code":73532,"sdk_version":"3.7.2","sdk_target_version":29,"os":"Android","os_version":"12","os_api":32,"device_model":"25053RT47C","device_brand":"Redmi","device_manufacturer":"Xiaomi","cpu_abi":"arm64-v8a","density_dpi":520,"display_density":"xxhdpi","resolution":"1280x2772","language":"zh","timezone":8,"access":"wifi","not_request_sender":0,"cdid":"\(cdid)","openudid":"\(openudid)","clientudid":"\(clientudid)","ipv6_list":[],"region":"CN","tz_name":"Asia/Shanghai","tz_offset":28800,"sim_region":"cn","sim_serial_number":[],"oaid_may_support":true,"req_id":"\(reqID)","device_platform":"android","custom":{"account_region_src":"fallback","host_bit":64,"account_region":"cn","dragon_device_type":"pad","is_android_fold":0,"filter_warn":0,"web_ua":"","is_android_pad":0},"pre_installed_channel":"","apk_first_install_time":\(nowMs),"is_system_app":0,"sdk_flavor":"china","guest_mode":0},"_gen_time":\(nowMs)}
         """
+        return (json, cdid, openudid, clientudid)
     }
 
     static func md5HexUpper(_ data: [UInt8]) -> String {
@@ -83,11 +85,13 @@ enum RealDeviceRegister {
     /// 执行真实注册；成功返回身份（含 store-region）。
     public static func register() async throws -> Identity {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let cdid = UUID().uuidString.lowercased()
-        let openudid = String(UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(16))
+        // payload 与 query 必须用同一组 cdid/openudid/clientudid（服务端校验一致性）
+        let payload = buildPayloadJSON(nowMs: nowMs)
+        let cdid = payload.cdid
+        let openudid = payload.openudid
+        let clientudid = payload.clientudid
 
-        let jsonStr = buildPayloadJSON(nowMs: nowMs)
-        let gz = try Gzip.compress(Data(jsonStr.utf8))
+        let gz = try Gzip.compress(Data(payload.json.utf8))
         guard let body = ttEncrypt([UInt8](gz)) else { throw HTTPError.invalidResponse }
 
         // query 与金标准一致（73532 族 + 随机 cdid/openudid + ts/_rticket）
@@ -169,7 +173,8 @@ enum RealDeviceRegister {
             if parts.count >= 2 { region = String(parts[1]) }
         }
         return Identity(deviceID: did, installID: iid, deviceToken: token,
-                        klinkEgdi: egdi, storeRegion: region, cdid: cdid, openudid: openudid)
+                        klinkEgdi: egdi, storeRegion: region, cdid: cdid,
+                        openudid: openudid, clientudid: clientudid)
     }
 }
 

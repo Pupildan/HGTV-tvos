@@ -109,9 +109,11 @@ public final class SignInterceptor: @unchecked Sendable {
         for (k, v) in params { merged[k] = v }
 
         // 2) 补全身份 query（原 app 弹幕/搜索 query 携带全身份，见抓包）
+        //    openudid/cdid/clientudid 用注册时的同一组值（覆盖 CommonParams 里的旧硬编码），
+        //    device_id 与身份指纹一致是个性化接口的硬要求。
         if !credentials.token.isEmpty { merged["device_token"] = credentials.token }
-        for key in ["openudid", "cdid", "klink_egdi", "rom", "rom_version",
-                    "carrier", "mcc_mnc", "apk_first_install_time"] {
+        for key in ["openudid", "cdid", "clientudid", "klink_egdi", "rom", "rom_version",
+                    "carrier", "mcc_mnc", "apk_first_install_time", "profile-format"] {
             if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
         }
 
