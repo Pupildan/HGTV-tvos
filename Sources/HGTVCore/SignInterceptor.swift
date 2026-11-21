@@ -97,7 +97,8 @@ public final class SignInterceptor: @unchecked Sendable {
                           params: [String: String],
                           body: [UInt8]?,
                           extraHeaders: [String: String] = [:],
-                          appFamily: Bool = false) -> SignedRequest {
+                          appFamily: Bool = false,
+                          legacySigning: Bool = false) -> SignedRequest {
         // 1) 合并公共 query（device_id / iid 来自凭证）
         var merged = CommonParams.query(
             deviceID: credentials.deviceId.isEmpty ? nil : credentials.deviceId,
@@ -113,9 +114,9 @@ public final class SignInterceptor: @unchecked Sendable {
             if let v = credentials.device[key], !v.isEmpty { merged[key] = v }
         }
 
-        // 3) 签名。V5 总开关关闭时直接走旧 XGorgon（v39/v40 秒崩根因在 V5，定位前先短路保命）。
+        // 3) 签名。legacySigning=true 或 V5 总开关关闭时直接走旧 XGorgon。
         let req: SignedRequest
-        if Self.useV5 {
+        if !legacySigning && Self.useV5 {
             // V5 签名（gorgonAligned/0081 + medusa v5 + helios + ladon/argus）。
             // appFamily 决定版本族：72232 走 appDevice，74332 走默认 device。
             // V5 任一环节降级返回 nil 时，回退到旧 XGorgon 签名器，保证 App 不 crash、请求照发。

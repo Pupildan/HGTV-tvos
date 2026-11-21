@@ -41,12 +41,13 @@ public final class APIService: Sendable {
     /// 拉书城 tab feed。tabType 对应原 APK 各 tab（找剧=8/真人剧=38/漫剧=32/电影=14…）。
     /// 无限 feed 机制：反复请求同一 URL，服务端每次按新 session 随机出 6 条，
     /// 客户端按 vid 去重累积。传 nil 时为默认（找剧 tab）。
-    public func fetchHome(tabType: Int? = nil) async throws -> [CategoryGroup] {
+    public func fetchHome(tabType: Int? = nil, legacy: Bool = false) async throws -> [CategoryGroup] {
         let target = HTTPTargetImpl(
             host: HGTVConfig.Host.fqnovel,
             path: HGTVConfig.Path.bookmallTab,
             query: tabType.map { ["tab_type": String($0)] } ?? [:],
-            signed: true
+            signed: true,
+            legacySigning: legacy
         )
         let raw = try await http.request(target)
         let dramas = Self.extractVideos(from: raw)

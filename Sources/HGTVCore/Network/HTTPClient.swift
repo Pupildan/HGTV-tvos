@@ -20,6 +20,8 @@ public protocol HTTPTarget {
     /// 版本族：true = 搜索/弹幕/账号族（72232）；false（默认）= 视频/landpage 族（74332）。
     /// 仅 signed 请求生效。
     var appFamily: Bool { get }
+    /// 强制走旧 XGorgon 签名器（v36 已验证 bookmall 可用）。诊断/回退用。
+    var legacySigning: Bool { get }
     /// 调用方额外补充头（如 Content-Encoding: gzip）；经 SignInterceptor 注入
     var extraHeaders: [String: String] { get }
 }
@@ -29,6 +31,8 @@ extension HTTPTarget {
     public var extraHeaders: [String: String] { [:] }
     /// 默认走视频/landpage 族
     public var appFamily: Bool { false }
+    /// 默认不走旧签名器
+    public var legacySigning: Bool { false }
 }
 
 public struct HTTPTargetImpl: HTTPTarget {
@@ -39,6 +43,7 @@ public struct HTTPTargetImpl: HTTPTarget {
     public let body: Data?
     public let signed: Bool
     public let appFamily: Bool
+    public let legacySigning: Bool
     public let extraHeaders: [String: String]
 
     public init(host: String,
@@ -48,6 +53,7 @@ public struct HTTPTargetImpl: HTTPTarget {
                 body: Data? = nil,
                 signed: Bool = true,
                 appFamily: Bool = false,
+                legacySigning: Bool = false,
                 extraHeaders: [String: String] = [:]) {
         self.host = host
         self.path = path
@@ -56,6 +62,7 @@ public struct HTTPTargetImpl: HTTPTarget {
         self.body = body
         self.signed = signed
         self.appFamily = appFamily
+        self.legacySigning = legacySigning
         self.extraHeaders = extraHeaders
     }
 }
@@ -119,7 +126,8 @@ public final class HTTPClient: Sendable {
                 params: target.query,
                 body: target.body.map { [UInt8]($0) },
                 extraHeaders: target.extraHeaders,
-                appFamily: target.appFamily
+                appFamily: target.appFamily,
+                legacySigning: target.legacySigning
             )
         } else {
             // 自建搜索中转：不签名，只拼 query，补 UA

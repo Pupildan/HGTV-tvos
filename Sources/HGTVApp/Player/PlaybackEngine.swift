@@ -44,11 +44,11 @@ final class PlaybackEngine {
     var onFeedRestored: (() -> Void)?
 
     private var seenVids: Set<String> = []
-    /// 推荐流翻页游标（landpage 官方分页接口，根治 bookmall 内容池重复）。
-    /// offset=0/session="" 为首页，后续翻页回传 nextOffset + sessionId。
-    private var feedOffset = 0
-    private var feedSessionId = ""
-    private var feedExhausted = false
+    /// feed 内容池轮换：3 个 tab 实测内容**完全不相交**（tab8 找剧 / tab38 真人剧 / tab32 漫剧）。
+    /// bookmall 端点不提供翻页（has_more 恒 false），轮换 tab 才有真正多样的无限流。
+    /// （v37/v39 曾试换 landpage 分页接口，但旧签名器签 landpage 返 0 字节 → 回退 bookmall。）
+    private let feedTabTypes: [Int] = [8, 38, 32]
+    private var feedTabCursor = 0
     /// 已确认拿不到播放地址的 vid（如电影）。resolve 失败时记录，用于自动跳过。
     private var failedVids: Set<String> = []
 
@@ -84,49 +84,81 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：拉首页 landpage（offset=0，limit=100）。
-    /// 官方分页接口：服务端按 session 个性化去重 + offset/limit 切页，根治 bookmall 池重复。
+    /// 首次加载，三级回退（每级结果都进日志，供诊断）：
+    /// ① landpage（V5 签名，正确池子）→ ② bookmall（V5 签名，A/B 判签名有效性）
+    /// → ③ bookmall（旧 XGorgon 签名器，v36 已验证保底）。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+
+        // ① landpage + V5（正确池子）
         do {
-            let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
-            feedOffset = page.nextOffset
-            feedSessionId = page.sessionId
-            feedExhausted = !page.hasMore
-            // 首页保持服务端个性化排序（不洗牌，尊重 hot_score + 去重）
-            let added = merge(page.items)
-            if added.isEmpty {
-                errorMessage = "暂无推荐内容"
-                DiagnosticsLogger.warn("首批 feed(landpage) 去重后为空", category: "playback")
-            } else {
-                hasLoaded = true
-                errorMessage = nil
-                DiagnosticsLogger.log("首批 feed(landpage offset=0) 已加载 \(added.count) 条，总计 \(items.count)，session=\(feedSessionId)",
-                                      category: "playback", level: .info)
+                let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+                let added = merge(page.items)
+                if !added.isEmpty {
+                    hasLoaded = true; errorMessage = nil
+                    DiagnosticsLogger.log("首批 feed：① landpage+V5 成功 \(added.count) 条", category: "playback", level: .info)
+                    return
+                }
+                DiagnosticsLogger.warn("① landpage+V5 返回 0 条（响应空或解析空）", category: "playback")
+            } catch {
+                DiagnosticsLogger.warn("① landpage+V5 失败: \(error.localizedDescription)", category: "playback")
             }
+        }
+
+        // ② bookmall + V5（A/B：判定 V5 签名是否被服务端接受）
+        do {
+            let groups = try await APIService.shared.fetchHome(tabType: 8, legacy: false)
+            let batch = groups.flatMap { $0.items ?? [] }
+            let added = merge(batch)
+            if !added.isEmpty {
+                hasLoaded = true; errorMessage = nil
+                DiagnosticsLogger.log("首批 feed：② bookmall+V5 成功 \(added.count) 条 → V5 签名有效，landpage 空是接口/门控层", category: "playback", level: .info)
+                return
+            }
+            DiagnosticsLogger.warn("② bookmall+V5 返回 0 条 → V5 签名仍被服务端拒", category: "playback")
+        } catch {
+            DiagnosticsLogger.warn("② bookmall+V5 失败: \(error.localizedDescription)", category: "playback")
+        }
+
+        // ③ bookmall + 旧签名器（v36 已验证保底）
+        do {
+            var allItems: [DramaItem] = []
+            for tab in feedTabTypes {
+                let groups = try await APIService.shared.fetchHome(tabType: tab, legacy: true)
+                allItems.append(contentsOf: groups.flatMap { $0.items ?? [] })
+            }
+            allItems.shuffle()
+            let added = merge(allItems)
+            if !added.isEmpty {
+                hasLoaded = true; errorMessage = nil
+                DiagnosticsLogger.log("首批 feed：③ bookmall+legacy 保底成功 \(added.count) 条", category: "playback", level: .info)
+                return
+            }
+            errorMessage = "暂无推荐内容"
+            DiagnosticsLogger.error("③ bookmall+legacy 也为空", category: "playback")
         } catch {
             errorMessage = error.localizedDescription
-            DiagnosticsLogger.error("首批 feed(landpage) 加载失败: \(error.localizedDescription)", category: "playback")
+            DiagnosticsLogger.error("首批 feed 全部回退失败: \(error.localizedDescription)", category: "playback")
         }
     }
 
     /// 无限 feed：landpage 翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
+    /// 无限 feed：按 tab 轮换请求（8→38→32 循环），按 vid 去重后追加。
+    /// landpage 分页暂缓（旧版签名器签 landpage 返空待解，回退 bookmall 保可用）。
     func loadMore() async {
-        guard !isLoadingMore, !feedExhausted else { return }
+        guard !isLoadingMore else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let page = try await APIService.shared.fetchLandpage(offset: feedOffset, sessionId: feedSessionId)
-            feedOffset = page.nextOffset
-            feedSessionId = page.sessionId
-            feedExhausted = !page.hasMore
-            var batch = page.items
-            batch.shuffle()   // 追加批次轻微洗牌（首页不洗，翻页洗以增多样）
+            let tab = feedTabTypes[feedTabCursor % feedTabTypes.count]
+            feedTabCursor += 1
+            let groups = try await APIService.shared.fetchHome(tabType: tab)
+            var batch = groups.flatMap { $0.items ?? [] }
+            batch.shuffle()   // 每批洗牌，追加顺序不固定
             let added = merge(batch)
-            DiagnosticsLogger.log("追加 feed(landpage offset=\(feedOffset)) +\(added.count) 条，总计 \(items.count) hasMore=\(page.hasMore)",
-                                  category: "playback", level: .info)
+            DiagnosticsLogger.log("追加 feed(tab=\(tab)) +\(added.count) 条，总计 \(items.count)", category: "playback", level: .info)
         } catch {
             // 追加失败静默（保留现有流），仅记日志。
             DiagnosticsLogger.warn("追加 feed 失败: \(error.localizedDescription)", category: "playback")
