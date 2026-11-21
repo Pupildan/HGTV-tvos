@@ -94,17 +94,16 @@ final class PlaybackEngine {
 
         // ① landpage + V5（正确池子）
         do {
-                let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
-                let added = merge(page.items)
-                if !added.isEmpty {
-                    hasLoaded = true; errorMessage = nil
-                    DiagnosticsLogger.log("首批 feed：① landpage+V5 成功 \(added.count) 条", category: "playback", level: .info)
-                    return
-                }
-                DiagnosticsLogger.warn("① landpage+V5 返回 0 条（响应空或解析空）", category: "playback")
-            } catch {
-                DiagnosticsLogger.warn("① landpage+V5 失败: \(error.localizedDescription)", category: "playback")
+            let page = try await APIService.shared.fetchLandpage(offset: 0, sessionId: "")
+            let added = merge(page.items)
+            if !added.isEmpty {
+                hasLoaded = true; errorMessage = nil
+                DiagnosticsLogger.log("首批 feed：① landpage+V5 成功 \(added.count) 条", category: "playback", level: .info)
+                return
             }
+            DiagnosticsLogger.warn("① landpage+V5 返回 0 条（响应空或解析空）", category: "playback")
+        } catch {
+            DiagnosticsLogger.warn("① landpage+V5 失败: \(error.localizedDescription)", category: "playback")
         }
 
         // ② bookmall + V5（A/B：判定 V5 签名是否被服务端接受）
