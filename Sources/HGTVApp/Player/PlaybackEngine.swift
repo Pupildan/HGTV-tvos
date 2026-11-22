@@ -84,32 +84,14 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：优先 bookmall/tab（AI漫剧入口，绕过 landpage 门控）；
-    /// bookmall 失败再走 landpage 多身份轮换。
+    /// 首次加载：只走官方推荐流 landpage，多身份轮换；无 bookmall 兜底。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        // ① AI漫剧入口：bookmall/tab/v（tab_type=16 含漫剧/AI剧混合 feed）
-        //    开发机已验证返回 ~65KB-1.1MB 真实数据，不依赖 landpage 门控。
-        for tabType in [16, 36] {  // 16=推荐混合(含AI剧), 36=漫剧专tab
-            do {
-                let groups = try await APIService.shared.fetchHome(tabType: tabType)
-                let all = groups.flatMap { $0.items ?? [] }
-                if !all.isEmpty {
-                    finishLoad(APIService.LandpagePage(
-                        items: all, nextOffset: all.count, sessionId: "", hasMore: true),
-                        source: "bookmall tab_type=\(tabType)")
-                    return
-                }
-                DiagnosticsLogger.warn("bookmall tab_type=\(tabType) 返 0 条", category: "playback")
-            } catch {
-                DiagnosticsLogger.warn("bookmall tab_type=\(tabType) 失败: \(error.localizedDescription)", category: "playback")
-            }
-        }
-
-        // ② 降级：landpage 多身份轮换（bookmall 也被拒时）
+        // 推荐流唯一数据源：POST /reading/distribution/category/landpage/v/
+        // 严格验签；medusa PB 已按 1.3.8.13 真机 ground truth 对齐。
         let presetCount = RealDeviceRegister.presetIdentities.count
         for i in 0..<presetCount {
             DeviceRegisterService.shared.applyPresetIdentity(i)
@@ -131,8 +113,8 @@ final class PlaybackEngine {
             }
         }
 
-        errorMessage = "bookmall + landpage 均未接通"
-        DiagnosticsLogger.error("首批 feed：bookmall 和 landpage 全部失败", category: "playback")
+        errorMessage = "landpage 未接通（无兜底）"
+        DiagnosticsLogger.error("首批 feed：landpage 全部身份均失败", category: "playback")
     }
 
     /// 尝试一次 landpage（首页）；成功返回页数据。
@@ -162,8 +144,8 @@ final class PlaybackEngine {
         }
     }
 
-    /// 无限 feed：landpage 翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
-    /// 无限 feed：landpage 接通时走真翻页（offset/session_id 续页）；否则 bookmall tab 轮换。
+    /// 无限 feed：landpage 真翻页（回传 nextOffset + sessionId，req_type=only_content），按 vid 去重追加。
+    /// landpage 未接通时不加载任何旧池子内容（无兜底）。
     func loadMore() async {
         guard !isLoadingMore else { return }
         isLoadingMore = true
