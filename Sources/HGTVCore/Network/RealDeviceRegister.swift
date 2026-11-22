@@ -216,18 +216,32 @@ public enum RealDeviceRegister {
             DiagnosticsLogger.error("真实注册被拒: \(String(data: data, encoding: .utf8) ?? "")", category: "device")
             throw HTTPError.deviceNotRegistered
         }
-        // store-region cookie（响应 Set-Cookie；domain snssdk.com）
+        // 注册响应 Set-Cookie 全集（fgtv-v2 响应抓包实锤：服务端下发
+        // store-region / store-region-src / install_id / ttreq 四件套；
+        // 原版 landpage 请求 Cookie 带全其中所有项——ttreq 之前被丢弃）。
+        // URLSession 会把多段 Set-Cookie 合并进 allHeaderFields，交给 HTTPCookie 拆。
         var region = "cn-zj"
-        if let sc = http.value(forHTTPHeaderField: "Set-Cookie") ?? http.allHeaderFields["Set-Cookie"] as? String,
-           let r = sc.split(separator: ";").first(where: { $0.contains("store-region") }) {
-            let parts = r.split(separator: "=")
-            if parts.count >= 2 { region = String(parts[1]) }
+        var cookies: [String: String] = [:]
+        if let sc = http.allHeaderFields["Set-Cookie"] as? String,
+           let url = resp.url {
+            for c in HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": sc], for: url) {
+                cookies[c.name] = c.value
+            }
         }
+        if let v = cookies["store-region"] { region = v }
+        // 顺序与原版一致：install_id; store-region; ttreq; store-region-src
+        let order = ["install_id", "store-region", "ttreq", "store-region-src"]
+        let cookieHeader = order
+            .compactMap { name -> String? in
+                guard let v = cookies[name], !v.isEmpty else { return nil }
+                return "\(name)=\(v)"
+            }
+            .joined(separator: "; ")
         return Identity(deviceID: did, installID: iid, deviceToken: token,
                         klinkEgdi: egdi, storeRegion: region, cdid: cdid,
                         openudid: openudid, clientudid: clientudid,
                         apkFirstInstallTime: nowMs,
-                        cookieHeader: "store-region=\(region)")
+                        cookieHeader: cookieHeader.isEmpty ? "store-region=\(region)" : cookieHeader)
     }
 }
 
