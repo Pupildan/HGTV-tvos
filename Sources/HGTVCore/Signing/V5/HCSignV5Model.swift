@@ -34,6 +34,13 @@ struct HCMedusaDevice {
     var manufacturer: String = ""
     var hardware: String = ""
     var featureBits: Int64 = 0
+    // 1.3.8.13 真机档案（hook ground truth）：旧实现缺这些字段
+    var extra7: Int64 = 0
+    var extra8: Int64 = 0
+    var extra9: Int64 = 0
+    var extra10: Int64 = 0
+    var extra11: String = ""
+    var physicalSize: String = ""
 }
 
 struct HCMedusaConfigMaps {
@@ -60,6 +67,7 @@ struct HCMedusaSdk {
     var fkd: Int64 = 0
     var pd: Int32 = 0
     var startedAtSeconds: Int32 = 0  // dex: f1769c "startedAtSeconds" — SDK 启动秒
+    var clockValue: Int32 = 0        // dex: f1773g "clockValue" — 真机 27
     var maps: HCMedusaConfigMaps = HCMedusaConfigMaps()
     var requestChecks: HCDigestChecks = HCDigestChecks()
 }
@@ -135,9 +143,15 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[4] = i.deviceID
     v[5] = i.token
     v[6] = d.cache256
+    v[7] = d.extra7
+    v[8] = d.extra8
+    v[9] = d.extra9
+    v[10] = d.extra10
+    v[11] = d.extra11
     v[12] = d.timezone
     v[13] = d.locale
     v[14] = Int64(d.cpuCoreCount)
+    v[15] = d.physicalSize
     v[22] = d.androidRelease
     v[23] = Int64(d.brightness)
     v[24] = Int64(d.systemVolume)
@@ -172,8 +186,14 @@ func hcMedusaContext(_ i: HCMedusaIdentity, _ d: HCMedusaDevice, _ s: HCMedusaSd
     v[6] = i.sdkVersion
     v[7] = Int64(s.processID)
     v[8] = i.channel
+    v[13] = [
+        Int32(1): Int64(t.process.record0 / 1000),
+        Int32(2): Int64(3),
+        Int32(4): Int64(200),
+    ] as [Int32: Any]
     v[14] = i.appVersion
     v[15] = Int64(s.parentProcessID)
+    if s.clockValue != 0 { v[16] = Int64(s.clockValue) }
     v[17] = p17
     v[18] = t.firstTPIDR ^ t.callbackAddress ^ (o.timestamp & Int64(0xFFFFFFFF))
     v[19] = Int32(truncatingIfNeeded: (t.pointerGap ^ (o.timestamp & Int64(0xFFFFFFFF))) & Int64(0xFFFFFFFF))
