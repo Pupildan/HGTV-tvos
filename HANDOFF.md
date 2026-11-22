@@ -562,3 +562,35 @@ v73（helios+medusa 真版齐）→ landpage 出内容 = 收官；若仍 0B → 
 
 - 手机 PB ~1118B vs 我们 ~1064B 的 ~54B 差额未归因；若 v74 仍 0B，用 out13 的 I1.e 对拍 v23/v24 子消息
 - 路径坑：bash `/c/`=真C盘，`"C:\..."`引号路径=假 `C:\Program Files\Git\c\`，产物会分叉两处，用前 pwd 确认
+
+## 十六、AI漫剧入口 + medusa context 修正（2026-11-23 凌晨）
+
+### 16.1 dex 1.3.8.13 context 对拍（Java 原文）
+
+逐字段比对 H0/I1.java 的 context builder（map 变量，field 23 子消息）：
+
+| 字段 | dex | 我们（修复前） | 修复 |
+|---|---|---|---|
+| 1 | (int)((ts - startedAtSeconds) & 0xffffffff) 条件性 | **缺失** | ✅ 已加 |
+| 2,3,5,6,7,8,14,15 | ✓ | ✓ | — |
+| 12 | device 子消息 | ✓ | — |
+| 13 | **无** | **多了 v[13]={1,2,4}** | ✅ 已删 |
+| 16 | clockValue != 0 时发 | 无（clockValue=0 时也不发）| — |
+| 17,18,19,20,22,23 | ✓ | ✓ | — |
+| 24 | JSON 字符串 | JSON 字符串 ✓ | — |
+
+- J1.toString 实锤: pointerGap=1804（常量）、tokenPointerTLS=0
+- startedAtSeconds = f1769c = SDK 启动秒 = nowMS/1000
+
+### 16.2 AI漫剧入口（bookmall/tab 优先）
+
+- PlaybackEngine.load() 改为**优先走 bookmall/tab/v**（tab_type=16 混合 feed 含 AI 剧，tab_type=36 漫剧专 tab）
+- bookmall/tab/v 开发机验证：返回 1.15MB 真实数据（3 天前签名仍有效 → 非严格验签或宽窗口）
+- 响应中 AI 剧标记：`video_category_type: "ai_video"`，cell 含 series_id/series_title/video_list(vids)/series_cover
+- landpage 降级为 fallback（bookmall 也被拒时才走）
+
+### 16.3 工具链
+
+- jadx 1.5.7: C:\Users\Admin\jadxrun\out13\sources\（1.3.8.13 全量 Java）
+- dex SM3 可在 PC 编译运行（V1/b + D/AbstractC0032e stub）→ 标准 SM3
+- 1.3.8.13 medusa 全链 Java 源可读：I1.java(e=medusaDetailed), AbstractC0210r0.java(E=envelope), AbstractC0172j1.java(表+helpers)
