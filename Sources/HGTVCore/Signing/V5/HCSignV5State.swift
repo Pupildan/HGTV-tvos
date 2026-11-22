@@ -537,6 +537,7 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
         sts: 32251,
         fkd: 3855421825,
         pd: 1510177550,
+        startedAtSeconds: Int32(truncatingIfNeeded: nowMS / 1000),
         maps: HCMedusaConfigMaps(
             integers: [
                 "45ca7e170e474edadd7d40972a193ace": 247235599,

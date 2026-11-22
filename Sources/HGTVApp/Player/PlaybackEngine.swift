@@ -84,15 +84,33 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：landpage 正确池子 + 多身份切换（原 app 机制）。
-    /// 轮换顺序：预置身份池（原版镜像/抓包实证身份）→ 全新注册自愈（最多 3 个）。
+    /// 首次加载：优先 bookmall/tab（AI漫剧入口，绕过 landpage 门控）；
+    /// bookmall 失败再走 landpage 多身份轮换。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
+        // ① AI漫剧入口：bookmall/tab/v（tab_type=16 含漫剧/AI剧混合 feed）
+        //    开发机已验证返回 ~65KB-1.1MB 真实数据，不依赖 landpage 门控。
+        for tabType in [16, 36] {  // 16=推荐混合(含AI剧), 36=漫剧专tab
+            do {
+                let groups = try await APIService.shared.fetchHome(tabType: tabType)
+                let all = groups.flatMap(\.items)
+                if !all.isEmpty {
+                    finishLoad(APIService.LandpagePage(
+                        items: all, nextOffset: all.count, sessionId: "", hasMore: true),
+                        source: "bookmall tab_type=\(tabType)")
+                    return
+                }
+                DiagnosticsLogger.warn("bookmall tab_type=\(tabType) 返 0 条", category: "playback")
+            } catch {
+                DiagnosticsLogger.warn("bookmall tab_type=\(tabType) 失败: \(error.localizedDescription)", category: "playback")
+            }
+        }
+
+        // ② 降级：landpage 多身份轮换（bookmall 也被拒时）
         let presetCount = RealDeviceRegister.presetIdentities.count
-        // 预置身份池轮换
         for i in 0..<presetCount {
             DeviceRegisterService.shared.applyPresetIdentity(i)
             if let page = await tryLandpageOnce(tag: "预置#\(i)") {
@@ -100,7 +118,6 @@ final class PlaybackEngine {
                 return
             }
         }
-        // 全新注册自愈（原 app：被拒 → rebuilding → 换新身份）
         for attempt in 1...2 {
             do {
                 try await DeviceRegisterService.shared.reregister()
@@ -114,9 +131,8 @@ final class PlaybackEngine {
             }
         }
 
-        // 无兜底：landpage 失败直接显示错误（干净测试，不进旧池子）
-        errorMessage = "landpage 未接通（预置 2 身份 + 2 新注册身份均被拒）"
-        DiagnosticsLogger.error("首批 feed：landpage 全部身份失败，无兜底", category: "playback")
+        errorMessage = "bookmall + landpage 均未接通"
+        DiagnosticsLogger.error("首批 feed：bookmall 和 landpage 全部失败", category: "playback")
     }
 
     /// 尝试一次 landpage（首页）；成功返回页数据。

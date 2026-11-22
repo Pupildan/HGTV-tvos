@@ -59,6 +59,7 @@ struct HCMedusaSdk {
     var sts: Int32 = 0
     var fkd: Int64 = 0
     var pd: Int32 = 0
+    var startedAtSeconds: Int32 = 0  // dex: f1769c "startedAtSeconds" — SDK 启动秒
     var maps: HCMedusaConfigMaps = HCMedusaConfigMaps()
     var requestChecks: HCDigestChecks = HCDigestChecks()
 }
@@ -179,14 +180,13 @@ func hcMedusaContext(_ i: HCMedusaIdentity, _ d: HCMedusaDevice, _ s: HCMedusaSd
     v[20] = t.callbackAddress ^ (o.timestamp & Int64(0xFFFFFFFF))
     v[22] = Int64(m.integer("cede084aa3812c79e4614ee74ba582dd"))
     v[23] = Int64(m.integer("30c8cb0fcd3ea4c95cfd5170df341924"))
+    // dex I1.e: if (startedAtSeconds != 0) map.put(1, (int)((ts - startedAt) & 0xffffffff))
+    if s.startedAtSeconds != 0 {
+        v[1] = Int32(bitPattern: UInt32(o.timestamp & 0xFFFFFFFF) &- UInt32(bitPattern: s.startedAtSeconds))
+    }
     if s.devicePresent {
         v[12] = hcMedusaDeviceMessage(d, i, nowMS: o.timeMS, record0: t.process.record0)
     }
-    v[13] = [
-        Int32(1): Int64(t.process.record0 / 1000),
-        Int32(2): Int64(3),
-        Int32(4): Int64(200),
-    ] as [Int32: Any]
     return v
 }
 
