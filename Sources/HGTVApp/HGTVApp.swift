@@ -20,11 +20,22 @@ struct HGTVApp: App {
         // tvOS 上不做任何隐私弹窗前置（原 APK 的 targetSdk 29 逻辑不适用）；
         // 设备注册在首次联网时异步完成。
 
-        // —— V5 崩溃诊断（同步，必须在任何视图/网络之前）：若上次崩溃留下了面包屑，
-        //    本次启动整个会话禁用 V5（不崩），让面包屑安稳 flush 到日志通道。
-        //    flush 之后面包屑被清空 → 下次启动 V5 恢复 true → 复现崩→存新轨迹。交替一次必能发出。
+        // —— V5 崩溃诊断（同步，必须在任何视图/网络之前）。v63 修正判据：
+        //    mark() 在每次签名各阶段都会写面包屑（保留最近 60 条），正常会话结束时也会留下
+        //    完整轨迹；若日志服务器不在线 flush 不了会积压。若只看"有面包屑"就禁 V5，
+        //    会假阳性死循环（v62 实测：上次会话的 60 条正常签名轨迹 → 本次会话 V5 全程被禁
+        //    → landpage 全部走 legacy 旧签名 → 服务端必拒 0B，测试完全无效）。
+        //    新判据（双重豁免）：
+        //    ① 构建号变化（升级安装）= 旧轨迹属于旧构建，只 flush 不禁用；
+        //    ② 同构建下最后一条面包屑必须是 "✅ sign 完成"（完整签名序列收尾）；
+        //       不是 → 才认定上次真的崩在签名链路中，本次禁 V5 让轨迹安稳 flush。
         let pendingCrumbs = UserDefaults.standard.stringArray(forKey: "v5.crash.breadcrumbs") ?? []
-        if !pendingCrumbs.isEmpty {
+        let crumbsBuild = UserDefaults.standard.string(forKey: "v5.crash.breadcrumbs.build") ?? ""
+        let currentBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let isUpgrade = !pendingCrumbs.isEmpty && crumbsBuild != currentBuild
+        let crashedMidSign = !isUpgrade && (pendingCrumbs.last.map { !$0.contains("V5 ✅ sign 完成") } ?? false)
+        UserDefaults.standard.set(currentBuild, forKey: "v5.crash.breadcrumbs.build")
+        if crashedMidSign {
             SignInterceptor.useV5 = false
         }
 
@@ -34,8 +45,12 @@ struct HGTVApp: App {
             await DiagnosticsLogger.shared.registerTransport(TCPTransport())
             await DiagnosticsLogger.shared.start()
 
-            if !pendingCrumbs.isEmpty {
-                DiagnosticsLogger.warn("V5 诊断：检测到上次崩溃面包屑 \(pendingCrumbs.count) 条，本次会话禁用 V5 以 flush", category: "sign")
+            if crashedMidSign {
+                DiagnosticsLogger.warn("V5 诊断：上次签名序列未完成（疑似崩溃），本次会话禁用 V5 以 flush \(pendingCrumbs.count) 条", category: "sign")
+            } else if isUpgrade {
+                DiagnosticsLogger.info("V5 诊断：检测到 \(pendingCrumbs.count) 条旧构建面包屑（升级安装，豁免），V5 保持启用", category: "sign")
+            } else if !pendingCrumbs.isEmpty {
+                DiagnosticsLogger.info("V5 诊断：检测到 \(pendingCrumbs.count) 条历史面包屑（签名序列完整，非崩溃），V5 保持启用", category: "sign")
             }
             V5CrashBreadcrumbs.flushLastCrash()
 

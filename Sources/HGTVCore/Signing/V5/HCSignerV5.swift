@@ -450,6 +450,10 @@ final class HCSignerV5: @unchecked Sendable {
                     headers["x-reading-request"] = "\(ticket)-\(rid)"
                     headers["x-ss-stub"] = hcBytesToHex(hcDigest("MD5", body!)).uppercased()
                 }
+                // 完成标记（v63）：面包屑崩溃判据的依据——完整签名序列以本条收尾。
+                // mark 同步落盘，正常会话也会留下完整轨迹；若进程死在本行之前，
+                // 启动守卫读到"未完成序列"才判定真崩溃。
+                V5CrashBreadcrumbs.mark("V5 ✅ sign 完成 base=\(base)")
                 return Request(url: url, headers: headers, body: body,
                                method: method ?? (body == nil ? "GET" : "POST"))
             }

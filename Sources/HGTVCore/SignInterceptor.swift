@@ -192,10 +192,15 @@ public final class SignInterceptor: @unchecked Sendable {
             // ② 原版不带 X-HGTV-Anonymous / X-HGTV-Identity
             // ③ 原版不带 x-tt-trace-id
             // ④ 原版带 X-Tt-Store-Region / X-Tt-Store-Region-Src（TTNet 传输层注入）
+            // ⑤ UA 无 Cronet/TTNet 后缀 —— V5/legacy 两条路径统一在此裁剪
+            //   （v62 只给 V5 传了 uaCronet=false，legacy 降级路径漏网，v62 实测踩坑）
             headers.removeValue(forKey: "x-tt-token")
             headers.removeValue(forKey: Self.hgtvIdentityHeader)
             headers.removeValue(forKey: Self.hgtvAnonymousHeader)
             headers.removeValue(forKey: "x-tt-trace-id")
+            if let ua = headers["User-Agent"], let range = ua.range(of: "; Cronet/") {
+                headers["User-Agent"] = String(ua[..<range.lowerBound])
+            }
             let sr = credentials.device["store_region"] ?? ""
             if !sr.isEmpty {
                 headers[HGTVConfig.HeaderKey.storeRegion] = sr
