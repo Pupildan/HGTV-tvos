@@ -536,3 +536,29 @@ v73（helios+medusa 真版齐）→ landpage 出内容 = 收官；若仍 0B → 
 
 - **medusa 对拍**（唯一剩余）：hdr_capture.txt 有 58+ 个 x-medusa 样本（长 1160-1163 字节，首 4 字节簇 e9?2cff6a 高度规律）。真机 medusa 有状态（同 device_id+token 分桶跨请求推进），对拍需按 RREQH 配对同身份连续请求推演状态。v73 已带 v71 设备字段修正版 medusa。
 - v73 真机 landpage 判读：若仍 0B，medusa 内部字段即唯一嫌疑（仍可逐字节验证）。
+
+## 十五、medusa 攻坚新 ground truth（2026-11-23）—— 1.3.8.13 dex + SM3 实锤修复
+
+> 用户提供 HGTV_1.3.8.13.apk（比此前反编译的 1.3.7.3 底包新两代），已 apktool + jadx 双反编译。
+
+### 15.1 决定性验证方法（新资产）
+
+- jadx 1.5.7 位于 C:\Users\Admin\jadxrun\（1.3.8.13 全量 Java 源在 out13/sources/）
+- **把 dex 的 SM3 类（V1/b）抠出来在 PC javac 编译运行**："abc" → 66c7f0f4... = 标准 SM3 ✓
+- 新旧 dex SM3 smali 逐行 diff = 仅类名变化（S1→V1），实现一致 → 历代 SM3 都是标准
+
+### 15.2 实锤 bug（本次已修）
+
+- Swift `sm3Hash` 写错：FF 误用 (A,B,C)（标准=(B,C,D)），TT1 误用 W[j]（标准=W'[j]=W[j]^W[j+4]），"abc 校准"注释是假的
+- digest=sm3(key+n+key) 直接进 medusa envelope → ATV medusa 与服务端必然不一致 → landpage 0B 主因
+- 已改标准 SM3（CryptoPrimitives.swift，commit c2fb88c）
+
+### 15.3 其余逐项对拍一致（1.3.8.13 Java 原文）
+
+- envelope（H0/AbstractC0210r0.E）：obscure 全链、mask、inner、31 行 layout、六张表（perms/row3/select/patch/sboxes/rcon）、small 密码、外层组装 —— 与移植逐项一致
+- PB 字段（H0/I1.e）：v[1..17,20..24] 一致；v[18],[19] 在 context；CP_NONE="none" ✓
+
+### 15.4 未决（下轮）
+
+- 手机 PB ~1118B vs 我们 ~1064B 的 ~54B 差额未归因；若 v74 仍 0B，用 out13 的 I1.e 对拍 v23/v24 子消息
+- 路径坑：bash `/c/`=真C盘，`"C:\..."`引号路径=假 `C:\Program Files\Git\c\`，产物会分叉两处，用前 pwd 确认
