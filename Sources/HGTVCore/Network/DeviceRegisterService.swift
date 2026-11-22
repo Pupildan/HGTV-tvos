@@ -33,6 +33,7 @@ public final class DeviceRegisterService: @unchecked Sendable {
         var clientudid: String = ""
         var apkFirstInstallTime: Int64 = 0
         var cookieHeader: String = ""
+        var deviceProfile: [String: String]? = nil
     }
 
     private init() {
@@ -59,32 +60,31 @@ public final class DeviceRegisterService: @unchecked Sendable {
         let cookieValue = id.cookieHeader.isEmpty
             ? "install_id=\(id.installID); store-region=\(id.storeRegion); store-region-src=did"
             : id.cookieHeader
-        var dev = ["klink_egdi": id.klinkEgdi,
-                   "openudid": id.openudid,
-                   "cdid": id.cdid,
-                   "clientudid": id.clientudid,
-                   "rom_version": "BP2A.250605.031.A3",
-                   "rom": "A3",
-                   "device_type": "25053RT47C",
-                   "device_brand": "Redmi",
-                   "carrier": "CHINA MOBILE",
-                   "mcc_mnc": "46000",
-                   "openudid-source": "android_id",
-                   "profile-format": "official-v1",
-                   "channel": "69310258a",
-                   "store_region": id.storeRegion]
-        if String(id.apkFirstInstallTime) != "0" {
-            dev["apk_first_install_time"] = String(id.apkFirstInstallTime)
-        }
+        // 凭证 device 字典：档案值按身份走（v67 修复——此前硬编码 Redmi 档案，
+        // 预置三星身份的档案值进不了 credentials.device，UA/V5 dict 与 query 档案不一致；
+        // 身份 C 用自己的 1226*1080/360dpi/primary_random 档案——手机成功抓包实锤）
+        var credDevice: [String: String] = [
+            "klink_egdi": id.klinkEgdi,
+            "openudid": id.openudid,
+            "cdid": id.cdid,
+            "clientudid": id.clientudid,
+            "rom_version": "BP2A.250605.031.A3",
+            "rom": "A3",
+            "device_type": "25053RT47C",
+            "device_brand": "Redmi",
+            "carrier": "CHINA MOBILE",
+            "mcc_mnc": "46000",
+            "openudid-source": "android_id",
+            "profile-format": "official-v1",
+            "channel": "69310258a",
+            "store_region": id.storeRegion,
+            "apk_first_install_time": String(id.apkFirstInstallTime),
+        ]
         if isPreset {
-            // 预置身份=原版三星档案，query/V5 dict 全套随身份切换
-            for (k, v) in RealDeviceRegister.presetProfile where k != "apk_first_install_time_marker" {
-                dev[k] = v
+            let profile = id.deviceProfile ?? RealDeviceRegister.presetProfile
+            for (k, v) in profile where k != "apk_first_install_time_marker" {
+                credDevice[k] = v
             }
-            if !id.cdid.isEmpty { dev["cdid"] = id.cdid }
-            if !id.openudid.isEmpty { dev["openudid"] = id.openudid }
-            if !id.clientudid.isEmpty { dev["clientudid"] = id.clientudid }
-            if id.apkFirstInstallTime != 0 { dev["apk_first_install_time"] = String(id.apkFirstInstallTime) }
         }
         interceptor.updateCredentials(AccountCredentials(
             cookie: cookieValue,
@@ -95,21 +95,7 @@ public final class DeviceRegisterService: @unchecked Sendable {
             cdid: id.cdid,
             openudid: id.openudid,
             expiresAt: 0,
-            device: ["klink_egdi": id.klinkEgdi,
-                     "openudid": id.openudid,
-                     "cdid": id.cdid,
-                     "clientudid": id.clientudid,
-                     "openudid-source": "android_id",
-                     "profile-format": "official-v1",
-                     "mcc_mnc": "46000",
-                     "rom": "A3",
-                     "apk_first_install_time": String(id.apkFirstInstallTime),
-                     "rom_version": "BP2A.250605.031.A3",
-                     "device_type": "25053RT47C",
-                     "device_brand": "Redmi",
-                     "carrier": "CHINA MOBILE",
-                     "channel": "69310258a",
-                     "store_region": id.storeRegion]
+            device: credDevice
         ))
     }
 

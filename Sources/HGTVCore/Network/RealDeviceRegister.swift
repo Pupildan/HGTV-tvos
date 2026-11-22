@@ -31,6 +31,8 @@ public enum RealDeviceRegister {
         public let apkFirstInstallTime: Int64
         /// Cookie 头完整值（预置身份用；新注册为 store-region=...）
         public var cookieHeader: String = ""
+        /// 身份专属设备档案（nil = 用共享 presetProfile）
+        public var deviceProfile: [String: String]? = nil
     }
 
     // MARK: - 预置身份池（原版「多设备身份切换」机制）
@@ -40,6 +42,33 @@ public enum RealDeviceRegister {
     // 每个预置身份携带自己的完整三星档案——query/V5 device dict/UA 全套随之切换。
 
     public static let presetIdentities: [Identity] = [
+        // 身份 C（2026-11-22 手机实测暖身份）：fgtv-v2 响应抓包确认其在 WiFi 下
+        // landpage 连续成功（195-351KB/页，注册后 1 秒即成功），且 PC(OpenSSL/HTTP1.1)
+        // 原样重放也成功（377KB）——目前已知最可信身份。放在池首。
+        Identity(
+            deviceID: "3093339275809908",
+            installID: "3093339275814004",
+            deviceToken: "AAAYR3N2COO6LZJBHO2XYPIAF6M3NSS5J6V7OSEOFUFSMFVJFWBQGUSVJZFM5PGGMP3AEEGH563FYN4VKTTLY5WAHOLP7UAEED32EHYEUP66MQOJY3RKP55U4NLL2",
+            klinkEgdi: "AAKvKdL8rPboP7iOYP2Jh7Lx1-B_-p1lAqjFISZj_7vYL1nm2Kn8Rxo8",
+            storeRegion: "cn-zj",
+            cdid: "83bb8199-3cec-48ee-8e35-5c32232928c2",
+            openudid: "ac052ea31ff8401cba75",
+            clientudid: "bd7c0136-435c-471c-86f8-106b851aa357",
+            apkFirstInstallTime: 1795345419167,
+            cookieHeader: "install_id=3093339275814004; store-region=cn-zj; ttreq=1$f2e70aba5bc9e857702cb2ce81e55b09f31c04a6; store-region-src=did",
+            deviceProfile: [
+                "device_type": "SM-F7310",
+                "device_brand": "samsung",
+                "resolution": "1226*1080",
+                "dpi": "360",
+                "rom_version": "BP4A.251205.006.F7310ZCS9GZF1",
+                "rom": "F7310ZCS9GZF1",
+                "carrier": "中国电信",
+                "mcc_mnc": "46011",
+                "openudid-source": "primary_random",
+                "profile-format": "official-v1",
+            ]
+        ),
         Identity(
             deviceID: "1290207924645523",
             installID: "1290207924649619",
