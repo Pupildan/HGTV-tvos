@@ -127,6 +127,8 @@ func hcDigest(_ algorithm: String, _ value: [UInt8]) -> [UInt8] {
         return Array(Insecure.MD5.hash(data: Data(value)))
     case "SHA-512":
         return Array(SHA512.hash(data: Data(value)))
+    case "SHA-256":
+        return Array(SHA256.hash(data: Data(value)))
     default:
         DiagnosticsLogger.error("V5 hcDigest: unsupported algorithm \(algorithm)", category: "sign")
         return [UInt8](repeating: 0, count: 16)

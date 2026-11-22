@@ -102,6 +102,21 @@ struct HCMedusaOptions {
     var random: [Int64]? = nil
 }
 
+/** 1.3.8.13 I1.c: 长 device_token 派生 24 字符短 token。 */
+func hcMedusaShortToken(deviceToken: String, deviceID: String) -> String {
+    var material = Array("hgtv-sdk-token".utf8)
+    material.append(0)
+    material += Array(deviceToken.utf8)
+    material.append(0)
+    material += Array(deviceID.utf8)
+    let digest = hcDigest("SHA-256", material)
+    guard digest.count >= 18 else { return "" }
+    return hcBase64Encode(Array(digest[0..<18]))
+        .replacingOccurrences(of: "=", with: "")
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+}
+
 /** Go medusaTokenValid:宽松 base64 校验。 */
 func hcMedusaTokenValid(_ token: String) -> Bool {
     if token.isEmpty { return true }
@@ -187,7 +202,7 @@ func hcMedusaContext(_ i: HCMedusaIdentity, _ d: HCMedusaDevice, _ s: HCMedusaSd
     v[7] = Int64(s.processID)
     v[8] = i.channel
     v[13] = [
-        Int32(1): Int64(t.process.record0 / 1000),
+        Int32(1): Int64((o.timeMS - 180663) / 1000 + 3),
         Int32(2): Int64(3),
         Int32(4): Int64(200),
     ] as [Int32: Any]
@@ -236,7 +251,7 @@ func hcMedusaEnvironment(_ i: HCMedusaIdentity, _ s: HCMedusaSdk, _ t: HCMedusaT
         ",\"lp\":\"\(lp)\"" +
         ",\"fl\":\"\(fl)\"" +
         ",\"dyn\":\"\(dyn)\"" +
-        ",\"do\":0" +
+        ",\"do\":1" +
         ",\"tk\":\(tk)" +
         "}"
 }
