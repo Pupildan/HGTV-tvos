@@ -483,8 +483,18 @@ final class HCAutonomousState {
     static let keyC1 = "04b29480233f4def5c875875b6bdc3b1"
 }
 
-/** Go DefaultAutonomousState:与官方 7.4.3.32 稳定态一致的初始档案。 */
-func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64, processID: Int32 = 1) -> HCAutonomousState {
+/** Go DefaultAutonomousState:与官方 7.4.3.32 稳定态一致的初始档案。
+    v71：设备字段按身份档案注入——此前硬编码 HONOR VER-AN00/Android 12，
+    与身份注册档案（SM-F7310/samsung/Android 16）不一致；landpage 严格校验
+    medusa 设备字段 × 注册指纹一致性 → 拒绝（0B）。真机 SM-F7310 getprop 实锤。 */
+func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64, processID: Int32 = 1,
+                              profile: [String: String]? = nil) -> HCAutonomousState {
+    let p = profile ?? [:]
+    let model = p["device_type"] ?? "VER-AN00"
+    let brand = p["device_brand"] ?? "HONOR"
+    // 真机 SM-F7310（Galaxy Z Flip5）getprop 实锤：device=b5q product=b5qzcx
+    // board=kalama hardware=qcom。其他机型暂用默认（主用身份即 SM-F7310）。
+    let isFlip5 = model == "SM-F7310"
     let identity = HCMedusaIdentity(
         aid: "8662",
         deviceID: deviceID,
@@ -502,17 +512,17 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
         locale: "zh_CN",
         cpuCoreCount: 8,
         storageRAMGiB: [8, 7.5, 6.5, 5.5, 4.5, 3.5],
-        androidRelease: "12",
+        androidRelease: p["os_version"] ?? "16",
         brightness: 102,
         systemVolume: 7,
         usbConnected: -1,
-        model: "VER-AN00",
-        brand: "HONOR",
-        board: "VER-AN00",
-        product: "VER-AN00",
-        device: "VER-AN00",
-        manufacturer: "HONOR",
-        hardware: "VER-AN00",
+        model: model,
+        brand: brand,
+        board: isFlip5 ? "kalama" : "VER-AN00",
+        product: isFlip5 ? "b5qzcx" : "VER-AN00",
+        device: isFlip5 ? "b5q" : "VER-AN00",
+        manufacturer: brand,
+        hardware: isFlip5 ? "qcom" : "VER-AN00",
         featureBits: 21,
     )
     let sdk = HCMedusaSdk(

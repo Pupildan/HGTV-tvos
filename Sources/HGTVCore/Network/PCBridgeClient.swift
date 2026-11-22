@@ -16,8 +16,9 @@
 import Foundation
 
 public enum PCBridge {
-    /// 总开关（v69：签名 API 请求一律走桥）。
-    public static let isEnabled = true
+    /// 总开关：v70 实验结论——桥请求（PC OpenSSL）同样 0B → TLS 不是门控，
+    /// 真凶 = medusa 载荷设备字段与身份档案不一致（v71 修复）。桥关闭，回到直连。
+    public static let isEnabled = false
     /// PC 地址（开发机常驻；与日志服务器同机）。
     public static let host = "192.168.10.122"
     public static let port: UInt16 = 51900

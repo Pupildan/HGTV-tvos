@@ -341,7 +341,7 @@ final class HCSignerV5: @unchecked Sendable {
         if let existing = medusaStates[key] {
             state = existing
         } else {
-            let fresh = hcDefaultAutonomousState(did, token, nowMS: now)
+            let fresh = hcDefaultAutonomousState(did, token, nowMS: now, profile: d)
             fresh.initialize(nowMS: now)
             medusaStates[key] = fresh
             state = fresh
