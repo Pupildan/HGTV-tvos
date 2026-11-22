@@ -384,6 +384,7 @@ func hcMedusaDetailed(
 
     let plain = hcMedusaPB(v, schema: hcMedusaSchema)
     V5CrashBreadcrumbs.mark("V5 🧬 PB 完成 plainLen=\(plain.count)")
+    DiagnosticsLogger.warn("V5 🧬 PB hex=0x\(plain.map { String(format: "%02x", $0) }.joined())", category: "sign")
     let f0: Int64 = 3 << 59
     let f1: Int64 = Int64(qh[0] & 63) << 46
     let f2: Int64 = Int64(dgst[0] & 63) << 40
