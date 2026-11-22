@@ -81,7 +81,9 @@ public enum PCBridge {
                 var sent = 0
                 let arr = [UInt8](sendData)
                 while sent < arr.count {
-                    let n = send(sock, arr + sent, arr.count - sent, 0)
+                    let n = arr.withUnsafeBufferPointer { bp -> Int in
+                        send(sock, bp.baseAddress! + sent, arr.count - sent, 0)
+                    }
                     if n <= 0 { break }
                     sent += n
                 }
@@ -93,7 +95,9 @@ public enum PCBridge {
                 // 读到换行或对端关闭
                 var buf = [UInt8](repeating: 0, count: 65536)
                 while readData.count < 64 * 1024 * 1024 {
-                    let n = recv(sock, &buf, buf.count, 0)
+                    let n = buf.withUnsafeMutableBufferPointer { bp -> Int in
+                        recv(sock, bp.baseAddress, bp.count, 0)
+                    }
                     if n <= 0 { break }
                     readData.append(contentsOf: buf[0..<n])
                     if readData.contains(0x0A) { break }
