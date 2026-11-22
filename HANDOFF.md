@@ -518,3 +518,21 @@ landpage 门控 = **对签名五件套做严格校验**。我们的实现源自 
 ### 13.7 判读
 
 v73（helios+medusa 真版齐）→ landpage 出内容 = 收官；若仍 0B → 用 `replay_request.json` + 新鲜手机向量再对拍，此时唯一可能剩下的是 medusa 内部字段，仍可逐字节验证——**方法论已闭环，不存在需要"盲试"的环节**。
+
+## 十四、helios 破解收官（2026-11-23 凌晨）—— 112/112 逐字节验证，v73 已交付
+
+### 14.1 结论
+
+**x-helios 已完全破解**：`algstr = "MD5"`（apktool smali `F0/C3.smali` L7791 `const-string v6,"MD5"` → v22 → L8452 `e1.x(v6,…)` 调用链实锤，无需 frida）。Swift 结构本就正确，唯二 bug = Feistel 与块加密两处 `krotl64(_,61)` 应为 `kror64(_,61)`，已修（commit 5376c14）。
+
+**此前 phone_vector_test=False 的真凶 = 旧向量 ts 配对错误**（硬编码 1795345499；正确配对来自 hdr_capture.txt 01:07 会话同块 x-khronos=1795108068）。修正后用 hdr_capture.txt 的 112 个 (x-khronos, x-helios) 对拍 **112/112 全部逐字节匹配**。验证器 `Scripts/signing_verify/helios_verify.py` 双向量 True；Swift 侧已加手机向量单测。
+
+### 14.2 新方法论资产
+
+- **hdr_capture.txt 里躺着 112 个 helios 向量**：输出前 4 字节 = le32(rand) 可恢复 → (ts,rand) 全已知 → 任意实现可逐字节判真伪。无需重建 replay_request.json。
+- 旁证：手机与 ATV 跑同一套 1.3.8.6 签名 dex（gorgon 手机向量也用 wrapper 常量 67503104 验证通过），常量 8662/646637794 两端通用。
+
+### 14.3 剩余
+
+- **medusa 对拍**（唯一剩余）：hdr_capture.txt 有 58+ 个 x-medusa 样本（长 1160-1163 字节，首 4 字节簇 e9?2cff6a 高度规律）。真机 medusa 有状态（同 device_id+token 分桶跨请求推进），对拍需按 RREQH 配对同身份连续请求推演状态。v73 已带 v71 设备字段修正版 medusa。
+- v73 真机 landpage 判读：若仍 0B，medusa 内部字段即唯一嫌疑（仍可逐字节验证）。
