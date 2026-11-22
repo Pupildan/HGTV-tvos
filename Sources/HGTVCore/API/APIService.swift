@@ -113,6 +113,10 @@ public final class APIService: Sendable {
         public let sessionId: String
         /// 服务端是否还有更多（缺失时按 items 非空推断）。
         public let hasMore: Bool
+        public init(items: [DramaItem], nextOffset: Int, sessionId: String, hasMore: Bool) {
+            self.items = items; self.nextOffset = nextOffset
+            self.sessionId = sessionId; self.hasMore = hasMore
+        }
     }
 
     /// 拉一页推荐流。offset=0/sessionId="" 为首页（req_type=default），后续翻页传上页
