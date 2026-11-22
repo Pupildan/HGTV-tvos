@@ -594,3 +594,9 @@ v73（helios+medusa 真版齐）→ landpage 出内容 = 收官；若仍 0B → 
 - jadx 1.5.7: C:\Users\Admin\jadxrun\out13\sources\（1.3.8.13 全量 Java）
 - dex SM3 可在 PC 编译运行（V1/b + D/AbstractC0032e stub）→ 标准 SM3
 - 1.3.8.13 medusa 全链 Java 源可读：I1.java(e=medusaDetailed), AbstractC0210r0.java(E=envelope), AbstractC0172j1.java(表+helpers)
+
+### 16.5 v75 构建修复（run 165/166 失败 → 167 成功）
+
+- LandpagePage init 设为 public（原 memberwise init 是 internal）
+- CategoryGroup.items 是 Optional（[DramaItem]?），flatMap 需用 `$0.items ?? []` 解包
+- v75 = run 167 ✅，commit 85c9c4a，ipa 7.3MB
