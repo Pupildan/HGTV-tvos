@@ -409,3 +409,112 @@ AVPlayer **不能直接播内存 Data**，只能给 URL。故起本地 HTTP 服�
    - 手机上流量下也 0B → 身份全烧 → 看身份自愈换新身份后是否恢复（养身份假说），或对比 RREQH 找剩余差异。
    - 手机上 MVM `/player/v1` 的结果同样按此树判读（TVOS 不用它，但它是原版 app 能否播的直接证据）。
 3. **任何新抓的响应头 RRESPH 都要看**：风控网关常在响应头留标记（x-tt-logid / set-cookie 清空 / server 特征），这是定位拒绝原因的唯一直接线索。
+
+## 十二、v62→v72 排除链收官（2026-11-22 晚）—— 门控真因=签名算法版本漂移
+
+> 用户问"试了这么多版问题到底在哪"——本节给出完整证据链与剩余工作。
+
+### 12.1 五层排除链（每层都有实验证据）
+
+| 层 | 实验 | 结论 |
+|---|---|---|
+| 出口 IP | 手机同 WiFi 下 landpage 成功（195-351KB/页，含新注册身份） | ❌ 排除 |
+| TLS 指纹 | v70 桥：ATV 请求经 PC OpenSSL 栈代发仍 0B | ❌ 排除 |
+| 身份信任 | PC 重放手机身份请求 → 377KB ✓；ATV 同身份 → 0B | ❌ 排除（v68） |
+| headers/query | v66/v72 与手机成功请求逐项 diff，除 ts 外全一致 | ❌ 排除 |
+| **签名算法** | **gorgon/helios 是纯函数，用手机捕获的(输入,输出)对直接重算验证** | ✅ **真因** |
+
+### 12.2 签名算法版本漂移（根因）
+
+我们的五件套移植自 **1.3.7.7** 的 Kotlin，手机 app（fqnovel 7.4.3.2，包在 1.3.8.6 wrapper 里）实际运行的是**演进后的算法**：
+- **x-gorgon**：旧版 25 字节、KSA 全交换、二次改写 ^0x14、框架 [0x40,1]；真版（1.3.8.6 jadx H0/J3.e）30 字节、KSA 覆盖不交换、二次改写 reverse8(swap4(x)^nxt)^0xEB、框架 [4]=0x00 [5]=0x81、末尾 4 随机字节。**已忠实移植并用手机向量逐字节验证 ✓（v72）**
+- **x-helios**：同 ts 重算与手机输出不一致。真版 = J3.f：rk = md5(le32(rand)+"8662") 的 hex 字符串按 8 字节 LE 读 4 个；34 轮队列 Feistel（^i3 / ror61）；数据 = "ts-646637794-8662" PKCS 填充逐块加密；输出 = le32(rand)+密文。**语义已还原但逐字节验证还差一个细节**：`B1.l(4)` 是 lambda（I(data, lambda) = 逐字节渲染拼接，jadx 反编译失败的 1322 指令方法）——字节渲染方式未定（hex/大写/十进制均已试失败）
+- **x-medusa**：v71 修了设备字段（HONOR VER-AN00/Android12 → SM-F7310/b5q/b5qzcx/kalama/qcom/Android16，真机 getprop 实锤），内部未验证
+
+### 12.3 关键机制澄清
+
+- **bookmall/播放接口不验签（或宽松）→ 旧签名一直能过；landpage 严格验签 → 每项签名必须与真版逐字节一致**。这就是"参数全对齐却 0B"的本质。
+- 手机 app 自镜像机制：`adb install -r` 不失效镜像，必须 uninstall 重装（再次踩坑确认）。
+- 签名时效窗口极宽：90 分钟旧签名重放仍返回 377KB。
+- MVM ~6 次/秒 = feed 正常预取；同字节跨主机轮换 = 失败重试。
+- v66 曾误删 x-tt-dt——1.3.8.6 J3 头组装实锤真版发送 "x-tt-dt": ""——v72 已恢复。
+- 移植坑：`krotl64(b0, 61)` 应为 `kror64(b0, 61)`（rotateRight(…,61)）——kotlin_ref Signer.kt L234-242 实锤。
+
+### 12.4 剩余工作（按序）
+
+1. **helios 收尾**：`B1.l(4)` lambda 渲染——用 jadx `--show-bad-code` 重反编译 J3/f 所在 dex，或 frida hook 真机拿 md5→rk 中间值；修好后用手机向量逐字节验证
+2. **medusa 对拍**：J3.g + C0224u/C0163h2 内联实现；同法验证
+3. **v73 = helios+medusa 真版齐** → landpage 应通
+4. 全部工具链已在手：手机向量（hgtv-analysis/replay_request.json/phone_blocks.json）、纯函数重算验证脚本（Python）、PC 重放通道
+
+### 12.5 环境备忘
+
+- PC 日志服务器（51820）+ PC 桥（51900，已弃用但脚本在 bridge_server.py）
+- git push：credential.helper 指向已卸载的 WorkBuddy GCM 会卡死——用 PowerShell CredRead 读凭据管理器（blob=UTF-16LE）+ 临时 store 文件
+- bash `/c/xxx` = `C:\Program Files\Git\c\xxx`（假 C 盘）；真实路径用 `/cygdrive/c/` 或反斜杠
+
+## 十三、签名五件套攻坚终局（2026-11-22 深夜）—— 已破 gorgon，差 helios 一项
+
+> 本节取代 §12 的"剩余工作"，含全部可复用资产。接手人从这里开始，**不需要重走任何弯路**。
+
+### 13.1 一句话结论
+
+landpage 门控 = **对签名五件套做严格校验**。我们的实现源自 1.3.7.7 参考代码，与手机 app（7.4.3.2）实际算法有版本差异。gorgon 已破解并逐字节验证（v72 已带）；**helios 差最后一个参数**；medusa 待同法对拍。网络/IP/TLS/身份/参数全部排除（§12 排除链）。
+
+### 13.2 方法论（本轮最大资产——必须沿用）
+
+**纯函数签名头可以直接验证**：gorgon/helios/argus/ladon 的输出只由 (ts, query, body, rand) 决定，而手机捕获的请求里这些输入全部已知 → **用反编译算法重算，与捕获输出逐字节对比**，差异即暴露。这一方法把"盲试构建"变成了"逐字节对拍"。
+
+工具（都在 `hgtv-analysis/`）：
+- `replay_request.json` — 手机 landpage 成功请求全量（URL/21 个头/body），身份 C=3093339275809908
+- `phone_blocks.json` — 5 次 landpage 成功请求的 RSTAT/RREQH/RRESPH/RBODY 结构化数据
+- `gorgon_verified.py` — **真版 gorgon 完整实现（自测 match:True）**，可直接对照改 Swift
+- `helios_verify.py` — helios 还原进度验证器（atv_vector_test=True 证明结构与 Swift 一致；phone_vector_test=False = 待完成项）
+- `fresh_phone_logcat.txt` / `phone_full_logcat.txt` — 手机原始 logcat（含 RREQH 续行，解析用 `System\.out\(\s*\d+\): ` 格式）
+
+### 13.3 x-gorgon：已破解（✓ 逐字节验证）
+
+完整实现见 `gorgon_verified.py`（含自测）。要点：
+- 30 字节 = hex解码"8404" + [rnd16低,rnd16高,0x40,0x01] + RC4载荷(20B) + 4B随机，然后 [4]=0x00 [5]=0x81
+- RC4 载荷输入 = md5(query)[:4] + md5(body)[:4] + 0000 + le32(67503104) + be32(ts)
+- KSA **覆盖不交换**（s[i]=s[j]）；PRGA 恒 s[(y+y)&255]
+- 二次改写：reverse8(swap4(x) ^ nxt) ^ 0xEB
+- 已在 v72 进 Swift（gorgonAligned 整体替换，HCSignerV5.swift）
+
+### 13.4 x-helios：差一个参数（⚠️ 唯一剩余）
+
+结构（smali/kotlin_ref/ATV 向量三重确认）：
+- 轮密钥 = `M1( e1.x(algstr, concat(le32(rand), "8662".getBytes())), E0/f(mode=1) )`
+  - `e1.x(alg, v)` = `MessageDigest.getInstance(alg).digest(v)` — **纯 digest 包装，算法名是变量！**
+  - `E0/f mode=1` 渲染 = `String.format("%02x", byte & 0xff)`（小写 hex，smali pswitch_1b 实锤）
+  - 34 轮队列 Feistel：t=(ror64(b,8)+a)^i3；a=ror64(a,61)^t；b=队列弹出；块加密同构
+  - 数据 = `"ts-646637794-8662"` PKCS 填充逐 16 字节块
+- 输出 = le32(rand) + 各块密文（36B → 48 字符 base64）
+- ⚠️ **Swift 移植 bug（未修）**：`krotl64(b0, 61)` 应为 `kror64(b0, 61)`——kotlin_ref Signer.kt L234-242 实锤 rotateRight(…,61)
+
+**卡点**：`algstr` 参数（v29 寄存器，调用方上下文）未确认。"MD5" 小写/大写、"8662"+le32 反序、SHA-256/SM3/十进制渲染全部重算失败。注意 jadx f() 显示 "MD5" 但 jadx 对该函数有已知反编译缺陷（`I(String, B1.l(4))` 实为 I(bytes, lambda) 逐字节渲染——B1.l = E0/f，29 模式渲染器，mode=4 分支是无关的 T0 渲染）。
+
+**解法（二选一，都不需要盲试）**：
+1. frida hook 真机（手机连 adb 时 10 分钟）：hook `LF0/e1;->x(Ljava/lang/String;[B)[B` 打印 algstr 参数 + 输出 → 直接确认算法名与中间值
+2. jadx `--show-bad-code --decompilation-mode` 重反编译 J3 相关类，读 f() 的原始控制流
+
+拿到 algstr 后：改 `helios_verify.py` 的 phone_vector_test 直到 True → 移植进 Swift `helios()`（同时修 kror61 bug）→ v73。
+
+### 13.5 x-medusa：设备字段已修（v71），内部待对拍
+
+- v71 已修：`hcDefaultAutonomousState` 设备字段随身份档案（SM-F7310 → b5q/b5qzcx/kalama/qcom/Android16，真机 getprop 实锤；原默认 HONOR VER-AN00/Android12 与注册指纹矛盾）
+- 内部 PB 字段/线程仿真值未对拍。方法与 helios 相同：J3.g + C0224u 状态机 + C0163h2 内联版三方对照；medusa 有状态（按 device_id+token 分桶），验证时用同一身份连续两次请求推演状态
+- 注意：真版默认档案也是 VER-AN00（G1.b 实锤），但真 app 运行时会填充真实值——找填充点（G1.c(String...) 接收真实属性）
+
+### 13.6 其他已实锤细节（防返工）
+
+- x-tt-dt: "" **真版发送**（J3 头组装实锤）——v66 曾误删，v72 已恢复
+- x-ladon = 4 字节随机（真版 smali + 手机样本一致）；x-argus = le32(ts)（手机样本数值验证 ✓）
+- 头组装顺序（J3）：UA/Accept/khronos/x-tt-request-tag/sdk-version/passport-sdk(匿名6031190)/x-xs-from-web/argus/ladon/x-ss-req-ticket/gorgon/x-helios/x-medusa/x-tt-dt
+- 签名时效窗口极宽（90 分钟旧签名重放仍 200/377KB）
+- 手机 app 自镜像：`adb install -r` 不失效镜像，必须 uninstall 重装
+- PC 日志服务器 51820 + 桥 51900（已弃用）；日志行解析要按 tab 分段后取 JSON
+
+### 13.7 判读
+
+v73（helios+medusa 真版齐）→ landpage 出内容 = 收官；若仍 0B → 用 `replay_request.json` + 新鲜手机向量再对拍，此时唯一可能剩下的是 medusa 内部字段，仍可逐字节验证——**方法论已闭环，不存在需要"盲试"的环节**。
