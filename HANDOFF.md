@@ -362,3 +362,50 @@ AVPlayer **不能直接播内存 Data**，只能给 URL。故起本地 HTTP 服�
 - `exp_scripts/register_v2_rebuild.py`（Python 注册复刻）、`verify_gorgon_fix.py`（gorgon 对拍）、`diff_all_tables.py`（常量表全量 diff）
 - `kotlin_ref/`（1.3.7.7 Kotlin crypto 全量拷贝）、`apk_new/jadx_out/`（1.3.8.6 反编译）、`apktool_work/build/capture_now.txt`（真机抓包 135k 行）
 - 崩溃安全面包屑 `V5CrashBreadcrumbs`（UserDefaults 存活 + 启动 flush + 同步禁用开关）
+
+## 十一、v60→v62 勘误与新证据（2026-11-22）—— 重新挖矿已有捕获的产物
+
+> 本节是对 §十 部分结论的**修正**。起因：用户要求继续深挖 + 给 APK 加响应日志。
+> 深挖发现 §十 的几个"事实"是从不完整的捕获里错误推断的。
+
+### 11.1 勘误（§十 的三处错误）
+
+| §十 说法 | 实际情况 |
+|---|---|
+| "headers 从未抓到（唯一缺口）" | ❌ `apktool_work/build/hdr_capture.txt`（11-20 01:07，2.6MB）**有原版 landpage/bookmall 请求的完整请求头**（B/Z.u 注入把每层 Headers.add 都 dump 了）。当时漏挖了 |
+| "原版 landpage 成功抓包全部在手机流量网络" | ❌ 所有捕获（capture_now/sign_capture/hdr_capture）的 landpage 全部 `ac=wifi`。"成功"也没有任何响应证据 —— 三个捕获文件**没有一条响应记录**，成功与否当时只能靠 UI 观察推断 |
+| "6+ 身份 4 主机层级全试过"（暗示原版 app 在 WiFi 正常） | ❌ 原版 app 在本 WiFi **同样被门控**（见 11.2 重试证据） |
+
+### 11.2 本轮挖出的新事实（对拍基石）
+
+1. **原版 app 在本 WiFi 播放接口全线失败**：01:07 会话（hdr_capture）`/novel/player/multi_video_model/player/v1` **同一请求体（gzip 字节完全相同）在全部 12 个主机（api5/api3 × lf/lq/hl/sinfonlinea/b/c）上各重试 8-9 次（99 次/17 秒）**。00:38 会话（capture_now）693 次 MVM、21 个不同视频、每个都在 12 主机全部失败。landpage 反复 offset=0 重拉。
+   - ⚠️ 判读方法：MVM ~6 次/秒 = feed 正常预取节奏（**不是**风暴）；**相同字节跨主机轮换** = 失败重试。
+2. **IP 与 TLS 双双排除**（作为普适门控）：同一 WiFi 下，tvOS 的 URLSession + 老硬编码身份 `multi_video_model/v1/`（旧路径变体）866 次全部返回 18-27KB 真实数据；bookmall/tab 200/66KB。URLSession TLS + 本 IP 能过敏感接口 → 门控是**接口变体 × 身份信任 × 客户端指纹**的组合，不是网络层。
+3. **接口变体分层**：旧变体 `/novel/player/multi_video_model/v1/`（tvOS 在用）不受门控；新变体 `/player/v1`（原版在用）+ landpage 受门控。
+4. **身份信任分层**：新注册身份在原版 app 上也失败（1905892595378490，836 次失败）；长龄身份 1642051663562816 在原版 app 上出过内容（00:38-40），但被 v57-v60 + 原版镜像测试反复打烧（01:07 再用时已全主机失败）。
+5. **v60 landpage 与原版的 7 处 headers 差异**（hdr_capture 01:07 逐项对比，已在 v62 全部修复）：
+   ① UA 多了 `Cronet/TTNetVersion...` 后缀（原版 app API 请求一律不带，只有 tnc get_domains 带 —— 之前把 tnc 的 UA 错当成了 API UA）
+   ② 多发 `x-tt-token`（device_token 只在 query；x-tt-token 是登录会话头）
+   ③ 多发 `X-HGTV-Anonymous`（值还是 cdid，语义也不对）
+   ④ 多发 `x-tt-trace-id`
+   ⑤ Cookie 只有 store-region（原版 = install_id + store-region + ttreq + store-region-src）
+   ⑥ 缺 `X-Tt-Store-Region` / `X-Tt-Store-Region-Src` 头（TTNet 传输层注入）
+   ⑦ query 多了 `store_region=cn-zj`（该值走 Cookie/头，不进 query）
+6. **路径漂移之谜破案**：bash 的 `/c/xxx` 实际是 `C:\Program Files\Git\c\xxx`（MSYS `/` 挂载在 Git 安装目录），真实 C 盘要用 `/cygdrive/c/` 或 `C:\` 反斜杠路径。apktool_work 全套数据在 `C:\Program Files\Git\c\apktool_work\`，一直都在。
+
+### 11.3 本轮交付
+
+| 交付物 | 内容 |
+|---|---|
+| **v62**（CI 构建，commit d0b488e） | 上述 7 处 headers 差异逐项对齐（SignInterceptor + HCSignerV5.uaCronet 参数 + DeviceRegisterService cookie 补全）。v62 已无兜底，landpage 通/不通信号干净 |
+| **fgtv-v2-resplog-signed.apk**（工作区根目录） | 原版 APK + 响应日志注入 v2：F0/h3.f（所有接口响应汇聚点）注入 RSTAT（状态码+URL）/RREQH（最终请求头）/RRESPH（响应头）/RBODY+RPART（响应体分块）/REX（异常）五类标记。响应是历代捕获从未有过的数据。抓取说明见 `fgtv-v2-真机抓取说明.md` |
+| `hgtv-analysis/orig_landpage_headers.json` | 原版 landpage 完整请求头 JSON（01:07 会话） |
+
+### 11.4 下一步判读树
+
+1. **v62 真机（ATV，WiFi）**：landpage 若出内容 → 7 处 headers 里至少一处是门控点，收官。
+2. v62 仍 0B → **fgtv-v2 装手机抓两轮**（WiFi + 流量）：
+   - 手机上 landpage `RBODY len=0`（WiFi）+ 流量下有数据 → 出口 IP 门控实锤 → ATV 走热点/代理。
+   - 手机上流量下也 0B → 身份全烧 → 看身份自愈换新身份后是否恢复（养身份假说），或对比 RREQH 找剩余差异。
+   - 手机上 MVM `/player/v1` 的结果同样按此树判读（TVOS 不用它，但它是原版 app 能否播的直接证据）。
+3. **任何新抓的响应头 RRESPH 都要看**：风控网关常在响应头留标记（x-tt-logid / set-cookie 清空 / server 特征），这是定位拒绝原因的唯一直接线索。
