@@ -248,7 +248,8 @@ public final class DeviceRegisterService: @unchecked Sendable {
             openudid: id.openudid,
             clientudid: id.clientudid,
             apkFirstInstallTime: id.apkFirstInstallTime,
-            cookieHeader: id.cookieHeader
+            cookieHeader: id.cookieHeader,
+            deviceProfile: id.deviceProfile
         ))
         DiagnosticsLogger.info("切换到预置身份#\(index) device_id=\(id.deviceID)", category: "device")
         return true
