@@ -360,13 +360,16 @@ func sm3Hash(_ message: [UInt8]) -> [UInt8] {
         for j in 0..<64 {
             let SS1 = rotl((rotl(A, 12) &+ E &+ rotl(Tj[j], j % 32)), 7)
             let SS2 = SS1 ^ rotl(A, 12)
+            // GB/T 32905-2016 标准：FF 作用于 (B,C,D)，TT1 用 W'[j] = W[j] ^ W[j+4]。
+            // 旧实现误写 FF(A,B,C) 且漏掉 W'，digest 与 dex(1.3.8.13 已运行验证)/服务端不一致。
+            let Wp = W[j] ^ W[(j + 4) % 68]
             let FF: UInt32
-            if j < 16 { FF = A ^ B ^ C }
-            else { FF = (A & B) | (A & C) | (B & C) }
+            if j < 16 { FF = B ^ C ^ D }
+            else { FF = (B & C) | (B & D) | (C & D) }
             let GG: UInt32
             if j < 16 { GG = E ^ F ^ G }
             else { GG = (E & F) | (~E & G) }
-            let tt1 = (FF &+ D &+ SS2 &+ W[j]) & 0xFFFFFFFF
+            let tt1 = (FF &+ D &+ SS2 &+ Wp) & 0xFFFFFFFF
             let tt2 = (GG &+ H &+ SS1 &+ W[j]) & 0xFFFFFFFF
             D = C
             C = rotl(B, 9)
