@@ -50,6 +50,19 @@ public final class SignInterceptor: @unchecked Sendable {
 
     /// X-SS-DP 固定 aid
     public static let xSSDP = "8662"
+    /// landpage query 规范参数顺序（2026-11-22 手机成功抓包实锤，41 键固定序；
+    /// ts/_rticket 由签名器追加，恰好也在序列末尾）。
+    static let landpageQueryOrder: [String] = [
+        "iid", "device_id", "ac", "channel", "aid", "app_name", "version_code",
+        "version_name", "device_platform", "os", "ssmix", "device_type", "device_brand",
+        "language", "os_api", "os_version", "manifest_version_code", "resolution", "dpi",
+        "update_version_code", "host_abi", "dragon_device_type", "pv_player",
+        "compliance_status", "need_personal_recommend", "player_so_load",
+        "is_android_pad_screen", "openudid-source", "mcc_mnc", "openudid",
+        "profile-format", "clientudid", "rom", "cdid", "carrier",
+        "apk_first_install_time", "rom_version", "device_token", "klink_egdi",
+        "ts", "_rticket",
+    ]
     /// passport-sdk-version（登录后）/ 6031190（未登录）
     public static let passportSDKVersion = "5051452"
     public static let anonymousPassportSDKVersion = "6031190"
@@ -143,8 +156,12 @@ public final class SignInterceptor: @unchecked Sendable {
                 deviceOverride = base.merging(credentials.device) { _, new in new }
             }
             v5Lock.lock()
+            // v66：UA 版本恢复与原版一致——landpage 的 UA 恒为默认族 74332（原版 UA 不随
+            // query 的 73532 族变，v62 误改成 72232 与原版 UA 唯一值级偏差）。Cronet 后缀
+            // 由本函数出口（landpageFamily 分支）统一裁掉。
+            // queryOrder：手机成功抓包的规范参数顺序（原版 TTNet 固定序）。
             let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride,
-                                uaCronet: landpageFamily ? false : nil)
+                                queryOrder: landpageFamily ? Self.landpageQueryOrder : nil)
             v5Lock.unlock()
             if let v5req {
                 req = SignedRequest(url: v5req.url, headers: v5req.headers, body: v5req.body, method: v5req.method)
@@ -198,6 +215,9 @@ public final class SignInterceptor: @unchecked Sendable {
             headers.removeValue(forKey: Self.hgtvIdentityHeader)
             headers.removeValue(forKey: Self.hgtvAnonymousHeader)
             headers.removeValue(forKey: "x-tt-trace-id")
+            // 手机成功抓包（2026-11-22）的请求头里没有 x-tt-dt（旧抓包有，新版 app/Cronet
+            // 不发空值头）——对齐当前成功样本
+            headers.removeValue(forKey: "x-tt-dt")
             if let ua = headers["User-Agent"], let range = ua.range(of: "; Cronet/") {
                 headers["User-Agent"] = String(ua[..<range.lowerBound])
             }

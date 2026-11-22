@@ -390,13 +390,23 @@ final class HCSignerV5: @unchecked Sendable {
         return hcBase64Encode(output)
     }
 
-    static func encode(_ values: [String: String]) -> String {
-        values.map { "\(hcEncodeQuery($0.key))=\(hcEncodeQuery($0.value))" }.joined(separator: "&")
+    static func encode(_ values: [String: String], order: [String]? = nil) -> String {
+        // v66：queryOrder 按手机成功抓包的规范参数顺序输出（原版 TTNet 固定序）。
+        // order 未覆盖的键排在后面（稳定排序），保证每次请求字节级一致。
+        let keys: [String]
+        if let order = order {
+            let present = order.filter { values[$0] != nil }
+            let rest = values.keys.filter { !order.contains($0) }.sorted()
+            keys = present + rest
+        } else {
+            keys = values.map { $0.key }
+        }
+        return keys.map { "\(hcEncodeQuery($0))=\(hcEncodeQuery(values[$0] ?? ""))" }.joined(separator: "&")
     }
 
     func sign(_ base: String, _ values: [String: String], body: [UInt8]? = nil,
               method: String? = nil, deviceOverride: [String: String]? = nil,
-              uaCronet: Bool? = nil) -> Request? {
+              uaCronet: Bool? = nil, queryOrder: [String]? = nil) -> Request? {
         V5CrashBreadcrumbs.mark("V5 🔢 sign 开始 base=\(base) bodyLen=\(body?.count ?? 0)")
         var d = device
         if let ov = deviceOverride { d.merge(ov) { _, new in new } }
@@ -409,7 +419,7 @@ final class HCSignerV5: @unchecked Sendable {
             var merged = values
             merged["ts"] = String(ts)
             merged["_rticket"] = String(ticket)
-            let query = HCSignerV5.encode(merged)
+            let query = HCSignerV5.encode(merged, order: queryOrder)
             if branch(query, body, ts) == 0 {
                 V5CrashBreadcrumbs.mark("V5 🔢 分支命中 offset=\(offset)")
                 let url = "\(base)?\(query)"
@@ -445,7 +455,9 @@ final class HCSignerV5: @unchecked Sendable {
                 if body != nil {
                     headers["Content-Type"] = "application/json; charset=UTF-8"
                     headers["x-vc-bdturing-sdk-version"] = "4.0.3.cn"
-                    let ridRaw: Int64 = Int64(rnd() * 2_000_000_000.0)
+                    // v66：rid 固定 9 位（手机成功抓包实锤 276040551/390538357，
+                    // 原 0..2e9 会产出 8/10 位与原版位数不一致）
+                    let ridRaw: Int64 = Int64(rnd() * 899_999_999.0) + 100_000_000
                     let rid = UInt32(bitPattern: Int32(truncatingIfNeeded: ridRaw))
                     headers["x-reading-request"] = "\(ticket)-\(rid)"
                     headers["x-ss-stub"] = hcBytesToHex(hcDigest("MD5", body!)).uppercased()
