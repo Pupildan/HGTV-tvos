@@ -96,7 +96,7 @@ final class PlaybackEngine {
         for tabType in [16, 36] {  // 16=推荐混合(含AI剧), 36=漫剧专tab
             do {
                 let groups = try await APIService.shared.fetchHome(tabType: tabType)
-                let all = groups.flatMap { $0.items }
+                let all = groups.flatMap { $0.items ?? [] }
                 if !all.isEmpty {
                     finishLoad(APIService.LandpagePage(
                         items: all, nextOffset: all.count, sessionId: "", hasMore: true),
