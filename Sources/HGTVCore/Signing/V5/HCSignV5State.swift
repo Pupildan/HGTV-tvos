@@ -438,11 +438,12 @@ final class HCAutonomousState {
         // 身份 C（3093339275809908，真机暖身份）：fl[2..6] 用 hook 真值——
         // 2 会话 20 请求跨重启稳定，依赖手机 SDK 内部状态无法本地复现。
         if identity.deviceID == "3093339275809908" {
-            process.fl[2] = 77666667
-            process.fl[3] = 1796841732
-            process.fl[4] = 2262081776
-            process.fl[5] = 674112042
-            process.fl[6] = 869996543
+            // 真机值为无符号 32 位语义，按位模式存入 Int32（env 输出时 UInt32 还原）
+            process.fl[2] = Int32(bitPattern: UInt32(77666667))
+            process.fl[3] = Int32(bitPattern: UInt32(1796841732))
+            process.fl[4] = Int32(bitPattern: UInt32(2262081776))
+            process.fl[5] = Int32(bitPattern: UInt32(674112042))
+            process.fl[6] = Int32(bitPattern: UInt32(869996543))
         }
         var b = [UInt8](repeating: 0, count: 12)
         for i in 0..<12 { b[i] = UInt8.random(in: 0...255) }
