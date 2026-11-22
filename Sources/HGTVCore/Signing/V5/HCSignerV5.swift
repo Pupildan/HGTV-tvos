@@ -443,6 +443,13 @@ final class HCSignerV5: @unchecked Sendable {
         V5CrashBreadcrumbs.mark("V5 🔢 sign 开始 base=\(base) bodyLen=\(body?.count ?? 0)")
         var d = device
         if let ov = deviceOverride { d.merge(ov) { _, new in new } }
+        // v80 关键修复：medusa/gorgon 的设备身份必须与实际 query 完全一致。
+        // HCVendor5.landpageDevice 内置硬编码 device_id/iid（旧 1905… 身份），
+        // 而 credentials.device 不含这两个键，导致 PB 设备号 ≠ query 设备号
+        // （v77-v79 实锤：URL=3568… / PB=1905…）→ landpage 全 host 0 字节。
+        for k in ["device_id", "iid", "install_id", "device_token"] {
+            if let v = values[k], !v.isEmpty { d[k] = v }
+        }
         d = d.filter { !$0.value.isEmpty }
         let now = clock()
         let ts = Int32(truncatingIfNeeded: now / 1000)

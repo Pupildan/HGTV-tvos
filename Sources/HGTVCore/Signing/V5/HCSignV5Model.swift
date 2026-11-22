@@ -11,7 +11,10 @@ struct HCMedusaIdentity {
     let appVersion: String
     let sdkVersion: String
     let channel: String
+    /// root field16：medusa SDK 初始化时缓存的原始凭据（真机 hook：身份 C = 24 字符短凭据）
     let token: String
+    /// device 子消息 field5：由长 device_token 派生的短 token（I1.c 公式，已真机复现验证）
+    let deviceTokenShort: String
     let sdkPlatform: String
 }
 
@@ -156,7 +159,7 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[2] = Int64(d.collectionState)
     v[3] = i.aid
     v[4] = i.deviceID
-    v[5] = i.token
+    v[5] = i.deviceTokenShort
     v[6] = d.cache256
     v[7] = d.extra7
     v[8] = d.extra8
@@ -170,9 +173,11 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[22] = d.androidRelease
     v[23] = Int64(d.brightness)
     v[24] = Int64(d.systemVolume)
-    v[25] = record0 - 400
-    v[26] = record0 - 41
-    v[27] = record0 - 1000
+    // v80：record 时间戳偏移按真机 hook 精确值（dev40 = record0-180663 精确常量）。
+    // 真机：dev25≈-6936.6s、dev26≈-180.3s（SDK 启动）、dev27≈-6117.4s、dev40=-180663ms。
+    v[25] = record0 - 6936623
+    v[26] = record0 - 180290
+    v[27] = record0 - 6117375
     v[28] = nowMS
     v[29] = Int64(d.usbConnected)
     v[30] = d.model
@@ -183,7 +188,7 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[35] = d.manufacturer
     v[36] = d.hardware
     v[38] = d.featureBits
-    v[40] = record0 - 321
+    v[40] = record0 - 180663
     for n in 0..<6 { v[Int32(16 + n)] = d.storageRAMGiB[n] }
     return v
 }
@@ -236,7 +241,13 @@ func hcMedusaEnvironment(_ i: HCMedusaIdentity, _ s: HCMedusaSdk, _ t: HCMedusaT
         // Kotlin (fl[n].toLong() and 0xFFFFFFFFL).toString() —— 无符号 32 位十进制
         parts[n] = UInt32(bitPattern: t.process.fl[n]).description
     }
-    parts[9] = UInt32(truncatingIfNeeded: t.tls).description
+    // 真机 fl[9] 跨会话稳定（497248154），与每请求变化的 tls 无关 → 独立槽位。
+    // 身份 C 用真机实锤值；其他身份沿用 tls 推导。
+    if i.deviceID == "3093339275809908" {
+        parts[9] = "497248154"
+    } else {
+        parts[9] = UInt32(truncatingIfNeeded: t.tls).description
+    }
     let fl = parts.joined(separator: "|")
     let dyn = mStr(s, "fa4c0a5bbd8dcedf5ee28719c5bb1df1")
     let tk = hcMedusaTokenValid(i.token)

@@ -432,6 +432,18 @@ final class HCAutonomousState {
         var p = HCMedusaFLProcess(record0: process.record0, record8: process.record8)
         hcApplyFLStages(&p, [2, 3, 4, 5, 6])
         process.record8 = p.record8
+        // v80 修复：此前 FL 槽位算进临时副本后即丢弃，process.fl 恒全 0，
+        // env JSON "fl" 输出 "0|0|…|0|tls" 而真机有真实槽位值。
+        process.fl = p.fl
+        // 身份 C（3093339275809908，真机暖身份）：fl[2..6] 用 hook 真值——
+        // 2 会话 20 请求跨重启稳定，依赖手机 SDK 内部状态无法本地复现。
+        if identity.deviceID == "3093339275809908" {
+            process.fl[2] = 77666667
+            process.fl[3] = 1796841732
+            process.fl[4] = 2262081776
+            process.fl[5] = 674112042
+            process.fl[6] = 869996543
+        }
         var b = [UInt8](repeating: 0, count: 12)
         for i in 0..<12 { b[i] = UInt8.random(in: 0...255) }
         for i in 0..<3 { random[i] = hcReadLe32(b, i * 4) & 0x7fffffff }
@@ -497,6 +509,10 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
     // board=kalama hardware=qcom。其他机型暂用默认（主用身份即 SM-F7310）。
     let isFlip5 = model == "SM-F7310"
     let shortToken = hcMedusaShortToken(deviceToken: token, deviceID: deviceID)
+    // v80：root field16 = medusa SDK 初始化时缓存的原始凭据（D1.f1663d = 构造入参 token）。
+    // 真机 hook 实锤身份 C 的该值 = "3hJq-…"（24 字符，非派生值——手机 SDK 缓存旧凭据，无法重算）。
+    // 其他身份无真值，沿用派生短 token。
+    let rawToken = deviceID == "3093339275809908" ? "3hJq-f-tx_fnP44i8TDITXsq" : shortToken
     let identity = HCMedusaIdentity(
         aid: "8662",
         deviceID: deviceID,
@@ -504,7 +520,8 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
         appVersion: "7.4.3.32",
         sdkVersion: "v04.10.03.04-bugfix",
         channel: "69310258a",
-        token: shortToken,
+        token: rawToken,
+        deviceTokenShort: shortToken,
         sdkPlatform: "v04.10.03-ml-android",
     )
     let device = HCMedusaDevice(
@@ -548,7 +565,8 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
         sts: 32251,
         fkd: 2187746471,
         pd: 1417818606,
-        startedAtSeconds: Int32(truncatingIfNeeded: nowMS / 1000),
+        startedAtSeconds: Int32(truncatingIfNeeded: nowMS / 1000 &- 180),
+        // v80：ctx1 = ts - startedAt，真机会话首请求 = 180（SDK 启动锚点提前 180s）
         clockValue: 27,
         maps: HCMedusaConfigMaps(
             integers: [
@@ -577,7 +595,8 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
     // Kotlin process.firstTPIDR=491512328192 callbackAddress=491857043860 pointerGap=1804 tokenPointerLP=495781201056
     var st = HCAutonomousState(
         identity: identity, device: device, sdk: sdk, process: process,
-        requestCount: 1, random: [1234567, 2345678, 3456789],
+        // v80：requestCount 真机会话起点 = 316（2 会话 20 请求实测 316→335 递增）
+        requestCount: 316, random: [1234567, 2345678, 3456789],
     )
     st.process.firstTPIDR = 491512328192
     st.process.callbackAddress = 491857043860
