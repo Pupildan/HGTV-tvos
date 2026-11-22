@@ -215,9 +215,8 @@ public final class SignInterceptor: @unchecked Sendable {
             headers.removeValue(forKey: Self.hgtvIdentityHeader)
             headers.removeValue(forKey: Self.hgtvAnonymousHeader)
             headers.removeValue(forKey: "x-tt-trace-id")
-            // 手机成功抓包（2026-11-22）的请求头里没有 x-tt-dt（旧抓包有，新版 app/Cronet
-            // 不发空值头）——对齐当前成功样本
-            headers.removeValue(forKey: "x-tt-dt")
+            // x-tt-dt 保留：1.3.8.6 jadx J3 头组装实锤真版 app 明确发送 "x-tt-dt": ""
+            // （v66 曾误删——旧 01:07 抓包与新抓包都有此头，只是值为空）
             if let ua = headers["User-Agent"], let range = ua.range(of: "; Cronet/") {
                 headers["User-Agent"] = String(ua[..<range.lowerBound])
             }

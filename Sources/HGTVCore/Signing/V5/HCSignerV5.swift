@@ -267,13 +267,46 @@ final class HCSignerV5: @unchecked Sendable {
         return hcBytesToHex(hcHexToBytes("8404") + [UInt8(truncatingIfNeeded: random), UInt8(truncatingIfNeeded: kshr32(random, 8)), 0x40, 1] + out)
     }
 
-    /** 官方 7.4.3.32 前缀:8404 + rnd16 + 00 81。 */
-    /** 官方 7.4.3.32 前缀:8404 + rnd16 + 00 81。 */
+    /** 1.3.8.6 jadx H0/J3.e 忠实移植（2026-11-22 用真机捕获向量逐字节验证 ✓）。
+        与旧版（1.3.7.7 Kotlin）差异：第二遍改写 ^0xEB（旧 ^0x14 再反）、
+        框架 [4]=0x00 [5]=0x81（旧 0x40,1）、总长 30 字节（末尾追加 4 随机字节）。
+        真版 app（7.4.3.2）gorgon 是 landpage 严格验签的对象——旧版即 0B 根因之一。 */
     func gorgonAligned(_ query: String, _ body: [UInt8]?, _ ts: Int32, _ random: Int32) -> String {
-        var bytes = hcHexToBytes(gorgon(query, body, ts, random))
-        bytes[4] = 0x00
-        bytes[5] = 0x81
-        return hcBytesToHex(bytes)
+        var input = Array(hcDigest("MD5", Array(query.utf8))[0..<4])
+        input += body != nil ? Array(hcDigest("MD5", body!)[0..<4]) : [UInt8](repeating: 0, count: 4)
+        input += [UInt8](repeating: 0, count: 4)
+        input += hcLe32(67503104)
+        input += hcBe32(ts)
+        let key: [Int32] = [0x4a, 0x40, 0x16, kshr32(random, 8) & 255, 0x47, 0x6c, 1, random & 255]
+        var s = [Int32](0...255)
+        var j: Int32 = 0
+        for i in 0...255 {
+            j = (j &+ s[i] &+ key[i % 8]) & 255
+            s[i] = s[Int(j)]              // 覆盖,非交换
+        }
+        var out = [UInt8](repeating: 0, count: input.count)
+        var i10: Int32 = 0
+        for n in 0..<input.count {
+            let i = n + 1
+            i10 = (i10 &+ s[i]) & 255
+            let y = s[Int(i10 & 255)]
+            s[i] = y
+            out[n] = UInt8(truncatingIfNeeded: Int32(input[n]) ^ Int32(s[Int((y &+ y) & 255)]))
+        }
+        let length = out.count
+        for i13 in 0..<length {
+            let i14 = Int32(out[i13]) & 255
+            let i15 = ((i14 << 4) | (i14 >> 4)) & 255
+            let nxt = Int32(out[i13 + 1 < length ? i13 + 1 : 0]) & 255
+            let rev = hcReverse8(UInt32(truncatingIfNeeded: (i15 ^ nxt) & 255))
+            out[i13] = UInt8(truncatingIfNeeded: Int32(rev) ^ (-21))
+        }
+        var tail4 = [UInt8](repeating: 0, count: 4)
+        for i in 0..<4 { tail4[i] = UInt8.random(in: 0...255) }
+        var f2 = hcHexToBytes("8404") + [UInt8(truncatingIfNeeded: random), UInt8(truncatingIfNeeded: kshr32(random, 8)), 0x40, 0x01] + out + tail4
+        f2[4] = 0x00
+        f2[5] = 0x81
+        return hcBytesToHex(f2)
     }
 
     /** 官方 7.4.3.32 的 x-ladon:4 字节随机值。 */
