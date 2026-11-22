@@ -389,8 +389,8 @@ final class HCSignerV5: @unchecked Sendable {
         return out
     }
 
-    func helios(_ ts: Int32, licenseId: String = "646637794") -> String {
-        let random = kRand()
+    func helios(_ ts: Int32, licenseId: String = "646637794", random fixedRandom: Int32? = nil) -> String {
+        let random = fixedRandom ?? kRand()
         let ascii = Array(hcBytesToHex(hcDigest("MD5", hcLe32(random) + Array("8662".utf8))).utf8)
         // Kotlin: table = mutableListOf(words[0])（含 w0）；b0=words.removeAt(0)=w0；b8=words.removeAt(0)=w1
         var words = (0..<4).map { hcI64(ascii, $0 * 8, little: true) }
@@ -400,7 +400,7 @@ final class HCSignerV5: @unchecked Sendable {
         for i in 0..<34 {
             var x8 = (kror64(b8, 8) &+ b0) ^ Int64(i)
             words.append(x8)
-            x8 = x8 ^ krotl64(b0, 61)
+            x8 = x8 ^ kror64(b0, 61)
             table.append(x8)
             b0 = x8
             b8 = words.removeFirst()
@@ -415,7 +415,7 @@ final class HCSignerV5: @unchecked Sendable {
             var b = hcI64(data, at + 8, little: true)
             for i in 0..<34 {
                 b = table[i] ^ (a &+ kror64(b, 8))
-                a = b ^ krotl64(a, 61)
+                a = b ^ kror64(a, 61)
             }
             output += hcLe64(a) + hcLe64(b)
             at += 16

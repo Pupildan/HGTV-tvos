@@ -30,4 +30,12 @@ struct SigningTests {
     // 给定已知 device_id / device_token / url / ts，
     // 断言 X-Gorgon / X-Argus / X-Ladon / X-Khronos 输出与原 APK 一致。
     // 向量来源：dex 中 core 模块单测（tools/ 目录约定），或对原 APK 抓包采集。
+
+    @Test("x-helios 手机向量逐字节一致（2026-11-22 hdr_capture 112/112 对拍）")
+    func heliosPhoneVector() {
+        // 真机捕获：ts=1795108068, rand=4156622897（从输出前 4 字节 le32 恢复）
+        let signer = HCSignerV5()
+        let out = signer.helios(1795108068, random: Int32(bitPattern: UInt32(4156622897)))
+        #expect(out == "MQjB95a6lp+CSsFpFEOvC/1JQGAQJt0IEK+ASN8oy7NsYXsT")
+    }
 }

@@ -16,8 +16,10 @@ x-helios 还原进度 + 验证器（2026-11-22）。
   - ⚠️ Swift 移植 bug：krotl64(b0, 61) 应为 kror64(b0, 61)（rotateRight(…,61)）
     —— kotlin_ref Signer.kt L234-242 实锤；Python 本文件用 ror64 已正确。
 
-未解：e1.x 的 algstr 参数值（v29 寄存器，调用方上下文）——MD5 大小写/SHA-256/SM3 均已试
-  皆不匹配手机向量；需 frida hook 或 --show-bad-code 重反编译确认 algstr 与可能的额外变换。
+✅ 已破（2026-11-22 深夜）：algstr = "MD5"（apktool smali F0/C3.smali L7791→v22→L8452 调用链实锤）。
+  结构与 helios_ror_ref 完全一致，唯二改动 = krotl64(_,61) → kror64(_,61)（Feistel L83 / 块加密 L96）。
+  验证 = hdr_capture.txt 01:07 会话 112 个 (x-khronos, x-helios) 对全部逐字节匹配 112/112。
+  ⚠️ 此前 phone_vector_test=False 的真凶 = 旧向量 ts=1795345499 配对错误（正确 ts=1795108068-85 同批）。
 
 运行本文件：先跑 atv_vector_test（应 True，证明与 Swift 一致），再跑 phone_vector_test
   （当前 False = helios 尚未还原完成）。
@@ -118,10 +120,10 @@ def atv_vector_test() -> bool:
 
 
 def phone_vector_test() -> bool:
-    """手机向量——True = helios 还原完成。"""
-    hv = base64.b64decode('dbNniieDhqt6cFWjowFCSt0W35f4zomnAD4k/THPt/FKvSMU')
+    """手机向量——True = helios 还原完成。（2026-11-22 已破：112/112）"""
+    hv = base64.b64decode('MQjB95a6lp+CSsFpFEOvC/1JQGAQJt0IEK+ASN8oy7NsYXsT')
     rand = struct.unpack('<I', hv[0:4])[0]
-    return helios_ror_ref(1795345499, rand) == hv
+    return helios_ror_ref(1795108068, rand) == hv
 
 
 if __name__ == '__main__':
