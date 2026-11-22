@@ -301,12 +301,10 @@ final class HCSignerV5: @unchecked Sendable {
             let rev = hcReverse8(UInt32(truncatingIfNeeded: (i15 ^ nxt) & 255))
             out[i13] = UInt8(truncatingIfNeeded: Int32(rev) ^ (-21))
         }
-        var tail4 = [UInt8](repeating: 0, count: 4)
-        for i in 0..<4 { tail4[i] = UInt8.random(in: 0...255) }
-        var f2 = hcHexToBytes("8404") + [UInt8(truncatingIfNeeded: random), UInt8(truncatingIfNeeded: kshr32(random, 8)), 0x40, 0x01] + out + tail4
-        f2[4] = 0x00
-        f2[5] = 0x81
-        return hcBytesToHex(f2)
+        // v81 关键修复：去掉尾部 4 字节随机数。真机 278 条抓包 + 成功重放
+        // 的 x-gorgon 均为 52 hex（= "8404"(2B)+2B 随机+"0081"+20B 数据），
+        // 我们此前多 4B 随机尾巴 → 60 hex，gorgon 结构性错误 → landpage 0 字节。
+        return hcBytesToHex(hcHexToBytes("8404") + [UInt8(truncatingIfNeeded: random), UInt8(truncatingIfNeeded: kshr32(random, 8)), 0x00, 0x81] + out)
     }
 
     /** 官方 7.4.3.32 的 x-ladon:4 字节随机值。 */
@@ -447,7 +445,13 @@ final class HCSignerV5: @unchecked Sendable {
         // HCVendor5.landpageDevice 内置硬编码 device_id/iid（旧 1905… 身份），
         // 而 credentials.device 不含这两个键，导致 PB 设备号 ≠ query 设备号
         // （v77-v79 实锤：URL=3568… / PB=1905…）→ landpage 全 host 0 字节。
-        for k in ["device_id", "iid", "install_id", "device_token"] {
+        // v81：设备档案键（rom_version/UA Build/分辨率等）一并强制对齐 query——
+        // UA Build 必须与 query rom_version 逐字符一致（真机抓包实锤）。
+        for k in ["device_id", "iid", "install_id", "device_token", "device_type",
+                  "device_brand", "rom_version", "rom", "os_version", "resolution",
+                  "dpi", "mcc_mnc", "carrier", "openudid", "cdid", "clientudid",
+                  "openudid-source", "profile-format", "apk_first_install_time",
+                  "klink_egdi"] {
             if let v = values[k], !v.isEmpty { d[k] = v }
         }
         d = d.filter { !$0.value.isEmpty }

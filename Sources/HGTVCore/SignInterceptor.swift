@@ -218,7 +218,10 @@ public final class SignInterceptor: @unchecked Sendable {
             // x-tt-dt 保留：1.3.8.6 jadx J3 头组装实锤真版 app 明确发送 "x-tt-dt": ""
             // （v66 曾误删——旧 01:07 抓包与新抓包都有此头，只是值为空）
             if let ua = headers["User-Agent"], let range = ua.range(of: "; Cronet/") {
-                headers["User-Agent"] = String(ua[..<range.lowerBound])
+                // v81 修复：裁掉 Cronet 后缀后必须补回右括号。
+                // 真机抓包实锤：landpage UA = "…Build/<rom_version>)"（带括号收尾），
+                // 此前裁剪后变成 "…F7310ZCS9GZF1" 缺右括号，UA 与真机格式不一致。
+                headers["User-Agent"] = String(ua[..<range.lowerBound]) + ")"
             }
             let sr = credentials.device["store_region"] ?? ""
             if !sr.isEmpty {
