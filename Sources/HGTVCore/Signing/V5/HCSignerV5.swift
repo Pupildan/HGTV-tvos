@@ -395,7 +395,8 @@ final class HCSignerV5: @unchecked Sendable {
     }
 
     func sign(_ base: String, _ values: [String: String], body: [UInt8]? = nil,
-              method: String? = nil, deviceOverride: [String: String]? = nil) -> Request? {
+              method: String? = nil, deviceOverride: [String: String]? = nil,
+              uaCronet: Bool? = nil) -> Request? {
         V5CrashBreadcrumbs.mark("V5 🔢 sign 开始 base=\(base) bodyLen=\(body?.count ?? 0)")
         var d = device
         if let ov = deviceOverride { d.merge(ov) { _, new in new } }
@@ -415,7 +416,10 @@ final class HCSignerV5: @unchecked Sendable {
                 let random = Int32(truncatingIfNeeded: Int64(rnd() * 65536.0))
                 let passportPath = base.contains("/passport/")
                 var headers = [String: String]()
-                headers["User-Agent"] = HCVendor5.userAgent(d, video: body != nil)
+                // UA Cronet 后缀：抓包实锤（hdr_capture 01:07）原版 app API 请求（含 POST landpage）
+                // 一律不带 Cronet/TTNet 后缀——只有 TTNet SDK 自身的 tnc get_domains 请求才带。
+                // uaCronet 显式传入时以其为准（landpage 固定 false），否则沿用旧的 POST=带后缀启发式。
+                headers["User-Agent"] = HCVendor5.userAgent(d, video: uaCronet ?? (body != nil))
                 headers["Accept"] = "application/json; charset=utf-8,application/x-protobuf"
                 headers["x-ss-req-ticket"] = String(ticket)
                 headers["x-tt-request-tag"] = "t=0;n=0"

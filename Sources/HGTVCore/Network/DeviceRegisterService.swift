@@ -54,7 +54,11 @@ public final class DeviceRegisterService: @unchecked Sendable {
     /// 把身份凭证写入拦截器（V5 device dict + query 全身份）。
     private func applyIdentity(_ id: StoredIdentity) {
         let isPreset = !id.cookieHeader.isEmpty
-        let cookieValue = id.cookieHeader.isEmpty ? "store-region=\(id.storeRegion)" : id.cookieHeader
+        // 原版 Cookie 全集（hdr_capture 01:07 实锤）: install_id + store-region +
+        // ttreq(服务端下发,新身份没有) + store-region-src。新注册身份补齐前三项。
+        let cookieValue = id.cookieHeader.isEmpty
+            ? "install_id=\(id.installID); store-region=\(id.storeRegion); store-region-src=did"
+            : id.cookieHeader
         var dev = ["klink_egdi": id.klinkEgdi,
                    "openudid": id.openudid,
                    "cdid": id.cdid,

@@ -115,8 +115,10 @@ public final class SignInterceptor: @unchecked Sendable {
         if landpageFamily {
             // landpage：应用全部身份档案键（抓包 #2 实锤 query 携带全套档案，
             // 含 device_type/brand/resolution/dpi/rom/carrier/mcc_mnc 等；
-            // 预置身份切换时三星档案随身份整体替换）
-            for (k, v) in credentials.device where !v.isEmpty { merged[k] = v }
+            // 预置身份切换时三星档案随身份整体替换）。
+            // store_region 不进 query（hdr_capture 01:07 实锤：原版 landpage query 无
+            // store_region，该值走 Cookie + X-Tt-Store-Region 头）
+            for (k, v) in credentials.device where !v.isEmpty && k != "store_region" { merged[k] = v }
         } else {
             for key in ["openudid", "cdid", "clientudid", "klink_egdi", "rom", "rom_version",
                         "carrier", "mcc_mnc", "apk_first_install_time", "profile-format",
@@ -141,7 +143,8 @@ public final class SignInterceptor: @unchecked Sendable {
                 deviceOverride = base.merging(credentials.device) { _, new in new }
             }
             v5Lock.lock()
-            let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride)
+            let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride,
+                                uaCronet: landpageFamily ? false : nil)
             v5Lock.unlock()
             if let v5req {
                 req = SignedRequest(url: v5req.url, headers: v5req.headers, body: v5req.body, method: v5req.method)
@@ -181,6 +184,23 @@ public final class SignInterceptor: @unchecked Sendable {
         if headers["x-tt-trace-id"] == nil {
             let uuid = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
             headers["x-tt-trace-id"] = "00-\(uuid)-\(uuid.prefix(16))-01"
+        }
+
+        if landpageFamily {
+            // hdr_capture(01:07) 实锤原版 landpage 头集与 v60 的差异，逐项对齐：
+            // ① 原版不带 x-tt-token（device_token 只在 query，x-tt-token 是登录会话头）
+            // ② 原版不带 X-HGTV-Anonymous / X-HGTV-Identity
+            // ③ 原版不带 x-tt-trace-id
+            // ④ 原版带 X-Tt-Store-Region / X-Tt-Store-Region-Src（TTNet 传输层注入）
+            headers.removeValue(forKey: "x-tt-token")
+            headers.removeValue(forKey: Self.hgtvIdentityHeader)
+            headers.removeValue(forKey: Self.hgtvAnonymousHeader)
+            headers.removeValue(forKey: "x-tt-trace-id")
+            let sr = credentials.device["store_region"] ?? ""
+            if !sr.isEmpty {
+                headers[HGTVConfig.HeaderKey.storeRegion] = sr
+                headers[HGTVConfig.HeaderKey.storeRegionSrc] = "did"
+            }
         }
 
         return SignedRequest(url: req.url, headers: headers, body: req.body, method: req.method)
