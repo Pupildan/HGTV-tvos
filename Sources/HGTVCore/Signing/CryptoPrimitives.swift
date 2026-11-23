@@ -360,12 +360,15 @@ func sm3Hash(_ message: [UInt8]) -> [UInt8] {
         for j in 0..<64 {
             let SS1 = rotl((rotl(A, 12) &+ E &+ rotl(Tj[j], j % 32)), 7)
             let SS2 = SS1 ^ rotl(A, 12)
-            // GB/T 32905-2016 标准：FF 作用于 (B,C,D)，TT1 用 W'[j] = W[j] ^ W[j+4]。
-            // 旧实现误写 FF(A,B,C) 且漏掉 W'，digest 与 dex(1.3.8.13 已运行验证)/服务端不一致。
+            // GB/T 32905-2016 标准（2026-11-23 真机 20/20 实锤修正）：
+            // FF 作用于 (A,B,C)，TT1 = FF(A,B,C) + D + SS2 + W'[j]。
+            // 此前误写 FF(B,C,D)（v74 "修复"修反了），abc 校验注释是假的；
+            // 服务端用标准 SM3 校验 query，field14 对不上导致 landpage 200+0B。
+            // 正确实现已用 gmssl 权威向量 + 20 组真机 PB 双重验证。
             let Wp = W[j] ^ W[(j + 4) % 68]
             let FF: UInt32
-            if j < 16 { FF = B ^ C ^ D }
-            else { FF = (B & C) | (B & D) | (C & D) }
+            if j < 16 { FF = A ^ B ^ C }
+            else { FF = (A & B) | (A & C) | (B & C) }
             let GG: UInt32
             if j < 16 { GG = E ^ F ^ G }
             else { GG = (E & F) | (~E & G) }

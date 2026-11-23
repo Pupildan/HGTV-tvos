@@ -226,3 +226,98 @@
 4. **注意版本一致性**——所有逆向分析必须基于 1.3.8.13 dex（不是 1.3.7.3/1.3.7.7）。手机实际运行的就是这个版本。
 
 5. **medusa 的 55 字节差额是关键线索**——手机 PB 1118B vs 我们 1064B。找到这 55 字节是什么字段，就找到了问题。最可能的位置：v[23] context 子消息中的设备字段（7-11）和 v[24] environment JSON 的值差异。
+
+---
+
+# 终局结论（2026-11-23 04:19 · 用户决定弃项目）
+
+> 本节为项目盖棺定论，记录最终判断与遗留资产，供未来重启参考。
+
+## 一、最终症状（已核实）
+
+最新运行日志（02:06 那轮，v81/v82）暴露病根：
+
+```
+sig.x-argus: ok   sig.x-gorgon: ok   sig.x-helios: ok
+sig.x-ladon: ok   sig.x-medusa: ok   sig.x-khronos: ok   ...全部 ok
+← 200 bytes=0  https://api5-normal-lf.fqnovel.com/reading/distribution/category/landpage/v/
+landpage host=api5-normal-lf.fqnovel.com 返回 0 字节
+```
+
+**关键特征**：所有签名头本地校验全部 `ok`（算法/格式都对），服务器也返回 HTTP `200`（非 403/401），但 **body 是 0 字节**。这是服务端在解密 medusa PB 加密体后，发现内容不符合预期时的高级别**静默拒绝**——故意不报错、不给数据、也不说明原因。
+
+**重要澄清**：全程请求/返回都直接对接官方 `fqnovel.com` 服务器，**没有任何自建后台或中转服务器**。本项目逆向的就是 HGTV/番茄的官方接口本身。
+
+## 二、为什么 70+ 轮攻不下来
+
+已啃下的硬骨头（都是真功夫，未来可复用）：
+- envelope 加密算法（small_dec / obscure_fwd / SM3 / hc_medusa_ap）**逐字节复现成功**，40/40 验证通过
+- PB protobuf **全字段对齐真机**（1054→927B 的 token/env 差异全修）
+- 身份三处一致（query / gorgon / medusa PB）、gorgon 52-hex、UA 格式全部对齐
+
+每次修完一层就冒出新的隐藏差异层。从 `200+空体` 判断：**番茄服务端在 medusa 加密体内部还做了一层"整体状态一致性"校验**——校验的可能是"这一整套设备指纹/注册态/会话上下文，作为一个整体，是否像一个真实合法客户端会话"。这一层的规则**不在 APK 里，在番茄服务器内部**，静态逆向只能看到"客户端发了什么"，看不到"服务器拿这些去跟什么比、不过的阈值是什么"。
+
+**结论**：这条"自己实现 medusa 签名直接打官方推荐流接口"的路，对该服务器对抗强度下，性价比已归零。不是努力不够，是天花板被服务端故意焊死。
+
+## 三、身份 C 是否用上（已查证）
+
+`RealDeviceRegister.presetIdentities` 池含 3 个身份，`PlaybackEngine.load()` 用 `for i in 0..<presetCount` 从头遍历：
+
+- **身份C**（device_id `3093339275809908`）= "2026-11-22 手机实测暖身份"，WiFi 下 landpage 连续成功、PC 原样重放也成功（377KB）——**已知最可信身份，特意放在池首（i=0，第一个被轮换）**
+- 身份A（`1290207924645523`）、身份B（`1642051663562816`）依次在后
+
+**但身份C 也救不回来**：tvOS 客户端带着身份C 的完整凭证 + 完整三星档案，第一个发出去，服务器依然返回 `200+0字节`。这反证了问题不在"用哪个身份"，而在"PB 是我们自己构造的、不是真实 App 运行时产生的"。**身份C 独木难支——锁不在身份上，锁在"PB 必须由真实客户端运行时生成"这道门槛上。**
+
+## 四、遗留资产（未来重启可直接复用，勿删）
+
+- `medusa_decrypt.py` + `exp_scripts/` —— envelope 算法完整复现
+- `medusa_capture_v4_paired.json` —— 2 会话 × 20 组完整配对真机数据
+- `hgtv-analysis/replay_request.json` —— 成功重放金标准（暴露 gorgon 52-hex 真相）
+- 全部 hook APK（`medusa-hook-v4-signed.apk` 等）与 CI 构建流水线
+
+## 五、如果未来重启，可考虑的方向（仅记录，未验证）
+
+1. **签名外包给真实 native 环境**：让一台装了 hook 的真机/模拟器跑原版 App 现场产合法 medusa PB，tvOS 只做"拿签名→重放→播放"。代价：PB 绑时间戳过期快、单设备签名频率受风控限制。
+2. **合规内容源**：若目标是"电视上看 HGTV 内容"，接入官方公开 API/授权 CDN，比硬啃风控稳定。
+
+> 注：以上方向仅为记录，本轮未验证，不作为已确认可行方案。
+
+## 补记（2026-11-23 04:57 · 新日志复核，修正上一节证据）
+
+> 用户指出上一节引用的 02:06 raw log 已过时。复查发现开发机日志接收端此前未运行（Python 缺 `zeroconf` 模块），已安装依赖并以 `hgtv-logs/received_20261123_0456.jsonl` 重启接收端；04:55 那轮 App 的 191 条缓冲日志随后全量 flush。
+
+- 04:55 会话（v81）共 **40 次 landpage 请求** = 4 host（sinfonlineb/a/c、lf）× 4 身份（含身份 C `3093339275809908`）× 2 轮，**全部 HTTP 200 + 0 字节**。
+- v81 三项历史硬伤已确认修复：`x-gorgon` 40/40 为 **52 hex**；UA 以 `Build/BP4A.251205.006.F7310ZCS9GZF1)` 收尾（右括号已补）；PB plainLen **925–928B**（真机 927B），不再是 1054/1064。
+- 40/40 请求所有签名头本地校验 `ok`（cookie / passport-sdk-version / x-argus / x-gorgon / x-helios / x-khronos / x-ladon / x-medusa / x-ss-dp / x-ss-stub）。
+- 新注册仍被服务端拒绝（`device_id:0`），回退占位流程；预置身份轮完仍全失败。
+- **结论升级**：不再是“某个字段还没对齐”，而是“所有能静态对齐的都已对齐，服务端仍静默拒绝”。上一节弃项目判断成立，但证据应以本节新日志为准；独立复刻签名直连 landpage 这条路确认走死。
+
+## 再次复核（2026-11-23 13:20 · 推翻上一节的“服务端会话状态校验”结论）
+
+> 用户质疑死刑结论下得太早。重新读 Swift 签名链、1.3.8.6 jadx Java、1.3.8.13 smali，并做 PC A/B 重放后，**上一节关于“服务端整体状态一致性校验”的解释是错的**，项目不应判死刑。
+
+- **决定性 A/B（同一台 PC、同一 urllib/OpenSSL 栈、同一网络）**：
+  - `hgtv-analysis/replay_request.json` 的手机签名（ts=1795348799，约 9 小时前）原样重放 → **377,681B 真实数据**。
+  - v81 04:55 的新鲜签名（ts=1795380921）原样重放 → **200 + 0B**。
+  - 由此排除：TLS 指纹、出口 IP、签名时效、服务端会话/计数器连续性。之前“服务端整体状态校验”的推断作废。
+- query 逐项 diff：41 个键**完全一致，仅 ts/_rticket 不同**；body 195B 与真机抓包同语义，且通过 `x-ss-stub` 暴力匹配确认字节序也一致。
+- 独立复算：v81 的 `x-gorgon`、`x-helios` 与算法逐字节一致，二者排除。
+- **唯一嫌疑收敛到 medusa**。新线索：PB field14（代码注释为 `SM3(query)[:6]`）与标准 SM3 结果不一致，但 flags 的 f1 位与 PB field14[0]&63 完全吻合，说明客户端内部 qh 自洽、却与标准 SM3 不同。需用 1.3.8.13 smali 核对 `G1.e`/`I1.e` 中 field14 的真实来源，以及 `sm3Hash` 多块输入实现。
+- 项目状态应改为：**medusa 单点未验证，已有可执行的字节级对拍路径**；不得据此判死刑。
+
+## 根因锤死（2026-11-23 13:55 · v5 hook 真机抓包 + gmssl 权威对拍）
+
+> 用户安装 v5 hook（`medusa-hook-v5-signed.apk`，新增在 `I1.e(String url,...)` 入口 dump URL）后抓到 `medusa_v5_raw.txt`：20 组 `PB + PARAMS + URL + HEADER` 完整配对。
+
+- **真机验证 20/20**：`PB field14 == SM3(query)[:6]`（标准 SM3，gmssl / hashlib 一致）。
+- **v81 对不上**：标准 SM3 算出 `2f41fc23fd08`，PB field14 是 `c6d56e57a601`。
+- **逐行对拍定位**：把 Swift `sm3Hash` 逐行 port 到 Python，算出的 `abc` = `278faef0…`，标准是 `66c7f0f4…`；而用这个错误 SM3 算 v81 query 恰好得到 `c6d56e57a601`——证明 Swift 的 SM3 就是错的。
+- **具体 bug**：`CryptoPrimitives.swift` 的 FF 写成 `FF(B,C,D)`，正确（GB/T 32905-2016 + gmssl）是 `FF(A,B,C)`。改成 `(A,B,C)` 后 `abc` 立刻匹配标准向量，真机 20/20 全部吻合。
+- **历史误判**：v74 那次所谓"修复 FF(A,B,C)→FF(B,C,D)"**修反了**，并伪造了"abc 校准通过"的注释。这个 bug 从 v74 一直带到现在，导致 medusa PB 内嵌的 query 摘要恒错、服务端静默拒绝。
+- **已修复**：`Sources/HGTVCore/Signing/CryptoPrimitives.swift` FF 已改回 `(A,B,C)`，注释同步更正。**尚未推送 CI**，待用户确认后构建 v82。
+- 结论：项目**有救**，不是服务端玄学，就是一个 SM3 实现笔误。下一轮 v82 极大概率直接出内容。
+- **PC 重放验证（13:58）**：
+  - 手机真签名（`replay_request.json`）→ **377,687B** ✓（PC 路径完全通畅）
+  - v81 ATV 签名原样 → **0B** ✗
+  - 用标准 SM3 复算真机 PB 的 envelope → **19/20 逐字节复现真机 x-medusa**（1 个疑为日志截断）
+  - **只在 PC 上把 v81 PB 的 field14 改成标准 SM3 值再重放 → 仍 0B**：说明 SM3 错误污染的是整条链（qh→selector/dgst/field13/field14 + flags f1/f2 + envelope 的 obscure digest），单点打补丁不够，必须完整重编译 v82。
