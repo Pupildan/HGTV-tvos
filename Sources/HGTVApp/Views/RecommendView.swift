@@ -108,12 +108,15 @@ struct RecommendView: View {
             // 详情页打开时也恢复导航（详情页是 fullScreenCover，tab 条本就不可见）
             if detailSeriesId != nil { appModel.tabBarHidden = false }
         }
-        // v24：从推荐流进的详情页，收到「返回推荐」时收起
+        // v90 修复 bug3：从详情页「返回推荐」只收起 UI 不够——若之前经过「选集」
+        // (onPickInPlayer → playSeries 把 items 整表换成同剧全集)，engine 还停在剧集连播模式，
+        // 表现为「返回后上下滑仍是同一部剧的前后集」。这里必须同时重置 engine 回推荐流。
         .onReceive(NotificationCenter.default.publisher(for: .hgtvReturnToRecommend)) { _ in
             Task { @MainActor in
                 detailSeriesId = nil
                 actionPanelVisible = false
                 appModel.tabBarHidden = true
+                await engine.returnToRecommendFeed()
             }
         }
         .onDisappear {

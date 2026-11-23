@@ -31,6 +31,10 @@ final class DYPlayerViewController: UIViewController {
     /// 返回推荐流后整表 reload + 回到第 0 条（v24）。
     private func handleFeedRestored() {
         manager.pauseAll()
+        // v90：清掉剧内换集状态与播完/卡住看门狗缓存，避免返回后残留串味导致界面不刷新。
+        endedHandledFor = nil
+        stallTicks = 0
+        lastStallTime = -1
         collectionView.reloadData()
         scrollTo(index: 0, animated: false)
     }
@@ -226,36 +230,88 @@ final class DYPlayerViewController: UIViewController {
     private func installEndCheckTimer() {
         guard endCheckTimer == nil else { return }
         endCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.checkPlaybackEnded() }
+            Task { @MainActor [weak self] in
+                self?.checkPlaybackEnded()
+                self?.checkPlaybackStall()
+            }
+        }
+    }
+
+    // MARK: - 播放卡住看门狗（v90）
+    /// 本地代理流偶发中途 stall：player.timeControlStatus=waiting 且 currentTime 长时间不动。
+    /// 连续 STALL_LIMIT 次（×0.5s）进度无变化 → 强制 reload 当前 item（seek 到原地重载缓冲），
+    /// 让 AVPlayer 重新拉流，避免永远卡在最后一帧。
+    private var lastStallTime: Double = -1
+    private var stallTicks = 0
+    private var lastStallReloadAt = Date.distantPast
+    private func checkPlaybackStall() {
+        guard let player = manager.peekPlayer(at: engine.index),
+              let item = player.currentItem,
+              item.status == .readyToPlay else { return }
+        // 已跨过片尾的交给播完逻辑，不当 stall 处理
+        let cur = player.currentTime().seconds
+        if item.duration.seconds.isFinite && cur >= item.duration.seconds - 0.5 { return }
+        // 只有在「应当在播」却卡住时才计（waiting 状态）
+        guard player.timeControlStatus == .waitingToPlayAtSpecifiedRate else {
+            stallTicks = 0; lastStallTime = -1; return
+        }
+        if abs(cur - lastStallTime) < 0.3 {
+            stallTicks += 1
+        } else {
+            stallTicks = 0
+            lastStallTime = cur
+        }
+        // 约 8s（16×0.5）无进展，且距上次重载 >20s → reload 当前 item
+        if stallTicks >= 16, Date().timeIntervalSince(lastStallReloadAt) > 20 {
+            lastStallReloadAt = Date()
+            stallTicks = 0
+            let vid = engine.vid(at: engine.index) ?? "?"
+            DiagnosticsLogger.warn("播放卡住 cur=\(String(format: "%.1f", cur))s，重载当前 item vid=\(vid)",
+                                   category: "playback")
+            player.seek(to: CMTime(seconds: max(0, cur - 1), preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+            player.play()
         }
     }
 
     /// 居中条目播完检测：已播进度到达片尾即切下一集（不依赖 EOS 通知）。
+    /// v90 修复：本地代理流的 currentTime 会越过 duration 继续增长（实测 dur=52s 但 cur=347s），
+    /// 旧逻辑每 0.5s 判一次「播完」狂刷屏。改为：只在「刚跨过片尾的那一次」触发切集，
+    /// 之后同一 item 不再重复报（切集成功后 item 换了、markEndedHandled 重置）。
+    private var endedHandledFor: AVPlayerItem?
     private func checkPlaybackEnded() {
         guard let player = manager.peekPlayer(at: engine.index),
               let item = player.currentItem,
               item.status == .readyToPlay,
               item.duration.seconds.isFinite, item.duration.seconds > 1 else { return }
         let cur = player.currentTime().seconds
-        if cur >= item.duration.seconds - 0.5 {
-            DiagnosticsLogger.log("轮询检测到播完 cur=\(String(format: "%.1f", cur))s dur=\(String(format: "%.1f", item.duration.seconds))s",
-                                  category: "playback", level: .debug)
-            autoAdvance()
-        }
+        let dur = item.duration.seconds
+        guard cur >= dur - 0.5 else { return }
+        // 同一个 item 只触发一次播完（防 cur 越过 dur 后每 0.5s 刷屏）
+        guard endedHandledFor !== item else { return }
+        endedHandledFor = item
+        DiagnosticsLogger.log("轮询检测到播完 cur=\(String(format: "%.1f", cur))s dur=\(String(format: "%.1f", dur))s",
+                              category: "playback", level: .info)
+        autoAdvance()
     }
 
     /// 自动切下一集（通知/轮询共用入口）。3s 去重防止双路径重复触发。
     /// 需求：①播完一整集 → 自动切**本剧**下一集（剧内换集，不滚动、不改 index）；
     ///      ②本剧播完 → 才续接 feed 下一部剧（scrollTo，切到不同剧）。
     /// 上下滑永远只在不同剧间移动（items 只放不同剧），与剧内换集完全解耦。
+    /// v90：切集任务进行中标记，防 await 期间轮询重复进入（防连跳两集）。
+    private var autoAdvancing = false
     private func autoAdvance() {
-        guard Date().timeIntervalSince(lastAutoAdvanceAt) > 3 else { return }
-        lastAutoAdvanceAt = Date()
+        // v90 修复：不要在 guard 通过后立刻写 lastAutoAdvanceAt——那会让下面 Task
+        // 内「await 展开（常秒回）」之后的第二个 guard 必然 <3s → 永远 return（295 次空转铁证）。
+        // 改为：入口只读判断 + in-flight 标记，真正决定切集时才写时间戳。
+        guard !autoAdvancing, Date().timeIntervalSince(lastAutoAdvanceAt) > 3 else { return }
+        autoAdvancing = true
         Task { [weak self] in
             guard let self else { return }
+            defer { self.autoAdvancing = false }
             // 确保本剧集数已就位（已展开则秒回；未展开则等红果拉取完成）
             await self.engine.expandSeriesIfNeeded()
-            guard Date().timeIntervalSince(self.lastAutoAdvanceAt) > 3 else { return }
 
             // ① 本剧还有下一集 → 剧内换集：同 index 换 vid，不滚动、不改 index
             if let nextVid = self.engine.nextEpisodeInCurrentSeries() {
