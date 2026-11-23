@@ -16,12 +16,38 @@
 import Foundation
 
 public enum PCBridge {
-    /// 总开关：v70 实验结论——桥请求（PC OpenSSL）同样 0B → TLS 不是门控，
-    /// 真凶 = medusa 载荷设备字段与身份档案不一致（v71 修复）。桥关闭，回到直连。
-    public static let isEnabled = false
+    /// 总开关：2026-11-23 起启用。SM3 FF 在 v83 修复后服务端仍 200+0B，
+    /// 静态复刻路到头；改走 PC 桥——PC 用手机真机合法签名重放官方接口
+    /// （已实测 377KB 稳定出数据）。ATV 只做 UI + 播放，签名/取数交给 PC。
+    public static let isEnabled = true
     /// PC 地址（开发机常驻；与日志服务器同机）。
     public static let host = "192.168.10.122"
     public static let port: UInt16 = 51900
+
+    /// 走 PC 代理拉 feed：PC 用预存的手机真签名重放 landpage，返回官方真实响应。
+    /// 协议：{"action":"feed"} → {status, body_b64, error}
+    public static func fetchFeed() async throws -> Data {
+        let payload: [String: Any] = ["action": "feed"]
+        let sendData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) + [0x0A]
+        let respData = try await sendAndRead(sendData)
+        guard let obj = try? JSONSerialization.jsonObject(with: respData, options: []) as? [String: Any] else {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -6,
+                                            userInfo: [NSLocalizedDescriptionKey: "PC feed 响应解析失败"]))
+        }
+        if let err = obj["error"] as? String, !err.isEmpty {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -7,
+                                            userInfo: [NSLocalizedDescriptionKey: "PC feed 失败: \(err)"]))
+        }
+        let status = obj["status"] as? Int ?? 0
+        guard status == 200 else {
+            throw HTTPError.catalogHTTP(status)
+        }
+        guard let b64 = obj["body_b64"] as? String, let data = Data(base64Encoded: b64) else {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -8,
+                                            userInfo: [NSLocalizedDescriptionKey: "PC feed 响应体解码失败"]))
+        }
+        return data
+    }
 
     public struct Response {
         public let status: Int
@@ -48,64 +74,7 @@ public enum PCBridge {
         ]
         let sendData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) + [0x0A]
 
-        // 每请求一条连接（LAN 开销可忽略），带超时
-        var readData = Data()
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            DispatchQueue.global().async {
-                var sock: Int32 = -1
-                defer { if sock >= 0 { close(sock) } }
-                var hints = addrinfo()
-                hints.ai_family = AF_INET
-                hints.ai_socktype = SOCK_STREAM
-                var info: UnsafeMutablePointer<addrinfo>? = nil
-                guard getaddrinfo(host, String(port), &hints, &info) == 0, let first = info else {
-                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -1,
-                                                                    userInfo: [NSLocalizedDescriptionKey: "DNS 失败"])))
-                    return
-                }
-                defer { freeaddrinfo(info) }
-                sock = socket(first.pointee.ai_family, first.pointee.ai_socktype, first.pointee.ai_protocol)
-                guard sock >= 0 else {
-                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -2,
-                                                                    userInfo: [NSLocalizedDescriptionKey: "socket 创建失败"])))
-                    return
-                }
-                // 20s 超时
-                var tv = timeval(tv_sec: 20, tv_usec: 0)
-                setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-                setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-                guard connect(sock, first.pointee.ai_addr, first.pointee.ai_addrlen) == 0 else {
-                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -3,
-                                                                    userInfo: [NSLocalizedDescriptionKey: "PC 桥连不上 \(host):\(port)"])))
-                    return
-                }
-                var sent = 0
-                let arr = [UInt8](sendData)
-                while sent < arr.count {
-                    let n = arr.withUnsafeBufferPointer { bp -> Int in
-                        send(sock, bp.baseAddress! + sent, arr.count - sent, 0)
-                    }
-                    if n <= 0 { break }
-                    sent += n
-                }
-                guard sent == arr.count else {
-                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -4,
-                                                                    userInfo: [NSLocalizedDescriptionKey: "请求发送不完整"])))
-                    return
-                }
-                // 读到换行或对端关闭
-                var buf = [UInt8](repeating: 0, count: 65536)
-                while readData.count < 64 * 1024 * 1024 {
-                    let n = buf.withUnsafeMutableBufferPointer { bp -> Int in
-                        recv(sock, bp.baseAddress, bp.count, 0)
-                    }
-                    if n <= 0 { break }
-                    readData.append(contentsOf: buf[0..<n])
-                    if readData.contains(0x0A) { break }
-                }
-                cont.resume(returning: ())
-            }
-        }
+        let readData = try await sendAndRead(sendData)
 
         guard let line = readData.split(separator: 0x0A, omittingEmptySubsequences: false).first,
               !line.isEmpty else {
@@ -133,5 +102,65 @@ public enum PCBridge {
             }
         }
         return Response(status: status, data: data, headers: respHeaders)
+    }
+
+    /// 底层 TCP 收发：把一行 JSON 发给 PC，读到第一行响应返回。所有 action 复用。
+    private static func sendAndRead(_ sendData: Data) async throws -> Data {
+        var readData = Data()
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global().async {
+                var sock: Int32 = -1
+                defer { if sock >= 0 { close(sock) } }
+                var hints = addrinfo()
+                hints.ai_family = AF_INET
+                hints.ai_socktype = SOCK_STREAM
+                var info: UnsafeMutablePointer<addrinfo>? = nil
+                guard getaddrinfo(host, String(port), &hints, &info) == 0, let first = info else {
+                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -1,
+                                                                    userInfo: [NSLocalizedDescriptionKey: "DNS 失败"])))
+                    return
+                }
+                defer { freeaddrinfo(info) }
+                sock = socket(first.pointee.ai_family, first.pointee.ai_socktype, first.pointee.ai_protocol)
+                guard sock >= 0 else {
+                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -2,
+                                                                    userInfo: [NSLocalizedDescriptionKey: "socket 创建失败"])))
+                    return
+                }
+                var tv = timeval(tv_sec: 20, tv_usec: 0)
+                setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+                setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+                guard connect(sock, first.pointee.ai_addr, first.pointee.ai_addrlen) == 0 else {
+                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -3,
+                                                                    userInfo: [NSLocalizedDescriptionKey: "PC 桥连不上 \(host):\(port)"])))
+                    return
+                }
+                var sent = 0
+                let arr = [UInt8](sendData)
+                while sent < arr.count {
+                    let n = arr.withUnsafeBufferPointer { bp -> Int in
+                        send(sock, bp.baseAddress! + sent, arr.count - sent, 0)
+                    }
+                    if n <= 0 { break }
+                    sent += n
+                }
+                guard sent == arr.count else {
+                    cont.resume(throwing: HTTPError.network(NSError(domain: "PCBridge", code: -4,
+                                                                    userInfo: [NSLocalizedDescriptionKey: "请求发送不完整"])))
+                    return
+                }
+                var buf = [UInt8](repeating: 0, count: 65536)
+                while readData.count < 64 * 1024 * 1024 {
+                    let n = buf.withUnsafeMutableBufferPointer { bp -> Int in
+                        recv(sock, bp.baseAddress, bp.count, 0)
+                    }
+                    if n <= 0 { break }
+                    readData.append(contentsOf: buf[0..<n])
+                    if readData.contains(0x0A) { break }
+                }
+                cont.resume(returning: ())
+            }
+        }
+        return readData
     }
 }
