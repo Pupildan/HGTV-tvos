@@ -198,7 +198,7 @@ public final class APIService: Sendable {
 
     /// 解析 landpage 响应：递归提取 video_data[]（复用 extractVideos）+ 翻页游标。
     /// session_id 可能出现在顶层、data 层或 recommend_info（自适应）。
-    static func parseLandpage(from data: Data, requestOffset: Int, requestSessionId: String) throws -> LandpagePage {
+    public static func parseLandpage(from data: Data, requestOffset: Int, requestSessionId: String) throws -> LandpagePage {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw HTTPError.invalidResponse
         }
