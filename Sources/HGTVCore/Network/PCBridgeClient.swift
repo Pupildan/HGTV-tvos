@@ -17,14 +17,14 @@ import Foundation
 
 public enum PCBridge {
     /// 总开关：2026-11-23 起启用。SM3 FF 在 v83 修复后服务端仍 200+0B，
-    /// 静态复刻路到头；改走 PC 桥——PC 用手机真机合法签名重放官方接口
-    /// （已实测 377KB 稳定出数据）。ATV 只做 UI + 播放，签名/取数交给 PC。
+    /// 静态复刻路到头；改走 NAS 桥——NAS 用手机真机合法签名重放官方接口
+    /// （已实测 377KB 稳定出数据）。ATV 只做 UI + 播放，签名/取数交给 NAS。
     public static let isEnabled = true
-    /// PC 地址（开发机常驻；与日志服务器同机）。
-    public static let host = "192.168.10.122"
-    public static let port: UInt16 = 51900
+    /// NAS 地址（常驻；飞牛 NAS 固定 IP）。
+    public static let host = "192.168.10.120"
+    public static let port: UInt16 = 51901
 
-    /// 走 PC 代理拉 feed：PC 用预存的手机真签名重放 landpage，返回官方真实响应。
+    /// 走 NAS 桥代理拉 feed：桥用预存的手机真签名重放 landpage，返回官方真实响应。
     /// 协议：{"action":"feed"} → {status, body_b64, error}
     public static func fetchFeed() async throws -> Data {
         let payload: [String: Any] = ["action": "feed"]
@@ -32,11 +32,11 @@ public enum PCBridge {
         let respData = try await sendAndRead(sendData)
         guard let obj = try? JSONSerialization.jsonObject(with: respData, options: []) as? [String: Any] else {
             throw HTTPError.network(NSError(domain: "PCBridge", code: -6,
-                                            userInfo: [NSLocalizedDescriptionKey: "PC feed 响应解析失败"]))
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS feed 响应解析失败"]))
         }
         if let err = obj["error"] as? String, !err.isEmpty {
             throw HTTPError.network(NSError(domain: "PCBridge", code: -7,
-                                            userInfo: [NSLocalizedDescriptionKey: "PC feed 失败: \(err)"]))
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS feed 失败: \(err)"]))
         }
         let status = obj["status"] as? Int ?? 0
         guard status == 200 else {
@@ -44,9 +44,36 @@ public enum PCBridge {
         }
         guard let b64 = obj["body_b64"] as? String, let data = Data(base64Encoded: b64) else {
             throw HTTPError.network(NSError(domain: "PCBridge", code: -8,
-                                            userInfo: [NSLocalizedDescriptionKey: "PC feed 响应体解码失败"]))
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS feed 响应体解码失败"]))
         }
         return data
+    }
+
+    /// 走 NAS 桥获取视频播放 CDN URL：桥从 redroid logcat 抓预签名 CDN URL。
+    /// 协议：{"action":"play"} → {status, play_url, error}
+    /// 返回可直接用 AVPlayer 播放的 HTTPS URL（预签名，无需额外认证）。
+    public static func fetchPlayUrl() async throws -> URL {
+        let payload: [String: Any] = ["action": "play"]
+        let sendData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) + [0x0A]
+        let respData = try await sendAndRead(sendData)
+        guard let obj = try? JSONSerialization.jsonObject(with: respData, options: []) as? [String: Any] else {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -6,
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS play 响应解析失败"]))
+        }
+        if let err = obj["error"] as? String, !err.isEmpty {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -7,
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS play 失败: \(err)"]))
+        }
+        let status = obj["status"] as? Int ?? 0
+        guard status == 200 else {
+            throw HTTPError.catalogHTTP(status)
+        }
+        guard let playUrlStr = obj["play_url"] as? String,
+              let url = URL(string: playUrlStr) else {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -8,
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS play 返回 URL 无效"]))
+        }
+        return url
     }
 
     public struct Response {

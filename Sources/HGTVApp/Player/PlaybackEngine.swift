@@ -84,14 +84,32 @@ final class PlaybackEngine {
 
     // MARK: - 数据加载（复用现有数据层，未改动）
 
-    /// 首次加载：只走官方推荐流 landpage，多身份轮换；无 bookmall 兜底。
+    /// 首次加载：优先走 NAS 桥 fetchFeed（377KB 稳定），失败回退自签 landpage。
     func load() async {
         guard items.isEmpty, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        // 推荐流唯一数据源：POST /reading/distribution/category/landpage/v/
-        // 严格验签；medusa PB 已按 1.3.8.13 真机 ground truth 对齐。
+        // 1) 优先走 NAS 桥 fetchFeed（桥用手机真签名重放，稳定 377KB）
+        if PCBridge.isEnabled {
+            do {
+                let feedData = try await PCBridge.fetchFeed()
+                let page = try APIService.shared.parseLandpageResponse(feedData)
+                if !page.items.isEmpty {
+                    feedOffset = page.nextOffset
+                    feedSessionId = page.sessionId
+                    feedExhausted = !page.hasMore
+                    landpageActive = page.hasMore || !page.items.isEmpty
+                    finishLoad(page, source: "NAS 桥 fetchFeed")
+                    return
+                }
+                DiagnosticsLogger.warn("NAS 桥 fetchFeed 返 0 条，回退自签", category: "playback")
+            } catch {
+                DiagnosticsLogger.warn("NAS 桥 fetchFeed 失败: \(error.localizedDescription)，回退自签", category: "playback")
+            }
+        }
+
+        // 2) 回退：自签 landpage（多身份轮换）
         let presetCount = RealDeviceRegister.presetIdentities.count
         for i in 0..<presetCount {
             DeviceRegisterService.shared.applyPresetIdentity(i)
@@ -114,7 +132,7 @@ final class PlaybackEngine {
         }
 
         errorMessage = "landpage 未接通（无兜底）"
-        DiagnosticsLogger.error("首批 feed：landpage 全部身份均失败", category: "playback")
+        DiagnosticsLogger.error("首批 feed：NAS 桥 + 自签全部失败", category: "playback")
     }
 
     /// 尝试一次 landpage（首页）；成功返回页数据。
@@ -328,8 +346,24 @@ final class PlaybackEngine {
     }
 
     /// 完整解密链路（取流 → 下载 → 派生密钥 → 解密 → 本地代理）。
+    /// v2：优先走 NAS 桥 fetchPlayUrl（直接返回预签名 CDN URL），失败回退自签解密。
     private func doResolve(_ vid: String) async throws -> URL {
         DiagnosticsLogger.log("resolve 开始 vid=\(vid)", category: "playback", level: .info)
+
+        // 1) 优先走 NAS 桥 fetchPlayUrl（直接返回 CDN URL，跳过解密链路）
+        if PCBridge.isEnabled {
+            do {
+                let cdnUrl = try await PCBridge.fetchPlayUrl()
+                DiagnosticsLogger.log("NAS 桥 play 成功 vid=\(vid) url=\(cdnUrl.absoluteString)", category: "playback", level: .info)
+                // CDN URL 直接可播，无需本地代理
+                urlCache[vid] = cdnUrl
+                return cdnUrl
+            } catch {
+                DiagnosticsLogger.warn("NAS 桥 play 失败: \(error.localizedDescription)，回退自签解密", category: "playback")
+            }
+        }
+
+        // 2) 回退：自签解密链路
         // 1) 取加密直链 + spade_a
         let stream = try await APIService.shared.fetchPlayback(vid: vid)
         guard !stream.spadeA.isEmpty else { throw PlaybackResolveError.missingKey }
