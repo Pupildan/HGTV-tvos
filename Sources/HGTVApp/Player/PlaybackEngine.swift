@@ -42,8 +42,8 @@ final class PlaybackEngine {
     var onDataReplaced: ((Int) -> Void)?
     /// 从剧集连播返回推荐流后触发，控制器据此整表 reload 并回到第 0 条。
     var onFeedRestored: (() -> Void)?
-    /// 推荐流整剧展开后触发(at, count)：控制器增量插入 cell，不打断当前播放/滚动。
-    var onItemsInserted: ((Int, Int) -> Void)?
+    /// 剧内换集后触发(index)：控制器重新 bind 该 cell（弹幕/首帧），不滚动。
+    var onEpisodeSwapped: ((Int) -> Void)?
 
     private var seenVids: Set<String> = []
     /// landpage 翻页游标（成功接入后 loadMore 续页）。
@@ -57,6 +57,12 @@ final class PlaybackEngine {
     private var expandedSeries: Set<String> = []
     /// 进行中的整剧展开任务（series_id → task），防并发重复拉取。
     private var inflightExpansions: [String: Task<Void, Never>] = [:]
+    /// 整剧集数缓存（series_id → 全量 vid_list，按剧顺序）。展开后供剧内换集取「下一集」。
+    private var seriesEpisodes: [String: [String]] = [:]
+    /// 剧内当前播放集覆盖（index → 实际播放的 vid）。
+    /// feed 的 items 永远只放不同短剧（一剧一条），上下滑只在不同剧间移动；
+    /// 剧内自动连播靠这个覆盖换集——同 index 换 vid，不滚动、不改 index。
+    private var episodeOverride: [Int: String] = [:]
 
     // MARK: - 本地代理缓存（vid → 解密后明文的本地 URL）
 
@@ -80,10 +86,13 @@ final class PlaybackEngine {
         items.indices.contains(index) ? items[index] : nil
     }
 
-    var currentVid: String? { currentDrama?.videoId }
+    /// 当前实际播放的 vid（含剧内换集覆盖）。
+    var currentVid: String? { vid(at: index) }
 
+    /// 实际播放的 vid：有剧内覆盖（同剧换集）用覆盖，否则用 feed 条目自身的 vid。
     func vid(at i: Int) -> String? {
-        items.indices.contains(i) ? items[i].videoId : nil
+        if let ov = episodeOverride[i] { return ov }
+        return items.indices.contains(i) ? items[i].videoId : nil
     }
 
     var itemCount: Int { items.count }
@@ -98,6 +107,9 @@ final class PlaybackEngine {
 
         // 1) 优先走 NAS 桥 fetchFeed（桥用手机真签名重放，稳定 377KB）
         if PCBridge.isEnabled {
+            // ATV 启动打一枪：让桥触发原版 app 冷启动+翻页刷新 landpage 池（异步，不阻塞本轮 feed）。
+            // 本轮先读已有池子，新数据在下一轮生效；桥失败无感忽略。
+            Task { await PCBridge.bump() }
             do {
                 let feedData = try await PCBridge.fetchFeed()
                 let page = try APIService.parseLandpage(from: feedData, requestOffset: 0, requestSessionId: "")
@@ -234,6 +246,9 @@ final class PlaybackEngine {
         }
         seenVids = Set(vids)
         items = dramaItems
+        // 选集模式整表替换：清掉推荐流遗留的剧内换集状态，避免 index 键串味
+        episodeOverride.removeAll()
+        seriesEpisodes.removeAll()
         let target = min(max(0, startIndex), vids.count - 1)
         index = target
         firstFrameReady = false
@@ -259,6 +274,8 @@ final class PlaybackEngine {
         items = []
         seenVids = []
         failedVids = []
+        episodeOverride.removeAll()
+        seriesEpisodes.removeAll()
         index = 0
         firstFrameReady = false
         hasLoaded = false
@@ -273,14 +290,15 @@ final class PlaybackEngine {
                               category: "playback", level: .info)
     }
 
-    // MARK: - 推荐流整剧连播（v新：刷到短剧自动衔接本剧下一集）
+    // MARK: - 推荐流整剧连播（v新：播完一整集才自动衔接本剧下一集；上下滑只切不同剧）
 
     /// 当前条目若属于某部剧（有 seriesId）且尚未展开，则拉红果 web 全量 vid_list，
-    /// 把「本集之后」的集数插到当前条目紧后面。这样播完当前集，autoAdvance 的
-    /// nearestPlayableIndex 自然命中本剧下一集（无缝连播），本剧播完才续接原推荐流。
+    /// **只缓存进 seriesEpisodes，绝不插进 items**——items 永远只放不同短剧（一剧一条），
+    /// 上下滑（焦点引擎在 items 间移动）就只会在不同剧之间切换。
+    /// 剧内连播靠 episodeOverride（同 index 换 vid，不滚动、不改 index）。
     /// 幂等：同 series 只展开一次；进行中复用同一个任务（不重复拉红果）。
     ///
-    /// 返回：本剧是否已「就绪可连播下一集」（已展开，或本次展开成功且后面还有集）。
+    /// 返回：本剧是否已展开就绪（episodeOverride 已指向当前集，后续集已缓存）。
     /// autoAdvance 切集前 await 它，避免异步竞争——否则剧还没拉回来就切到了 feed 下一部剧。
     @discardableResult
     func expandSeriesIfNeeded() async -> Bool {
@@ -288,22 +306,20 @@ final class PlaybackEngine {
               let seriesId = cur.seriesId, !seriesId.isEmpty,
               let curVid = cur.videoId, !curVid.isEmpty
         else { return false }
-        // 已展开过：直接视为就绪（后续集早已插在当前集后面）
         if expandedSeries.contains(seriesId) { return true }
-        // 复用进行中的任务，避免并发重复拉取
         let task: Task<Void, Never>
         if let existing = inflightExpansions[seriesId] {
             task = existing
         } else {
-            task = makeSeriesExpansionTask(seriesId: seriesId, curVid: curVid, cur: cur)
+            task = makeSeriesExpansionTask(seriesId: seriesId, curVid: curVid)
             inflightExpansions[seriesId] = task
         }
         await task.value
         return expandedSeries.contains(seriesId)
     }
 
-    /// 构造「拉整剧 + 注入本集后续集」的任务体（不做去重判断，由调用方负责幂等）。
-    private func makeSeriesExpansionTask(seriesId: String, curVid: String, cur: DramaItem) -> Task<Void, Never> {
+    /// 拉整剧集数缓存进 seriesEpisodes（不注入 items、不动 episodeOverride）。
+    private func makeSeriesExpansionTask(seriesId: String, curVid: String) -> Task<Void, Never> {
         return Task { [weak self] in
             guard let self else { return }
             defer { self.inflightExpansions[seriesId] = nil }
@@ -311,43 +327,39 @@ final class PlaybackEngine {
                 let detail = try await HongguoWeb.fetchSeriesDetail(seriesId: seriesId)
                 let vids = detail.vidList
                 guard !vids.isEmpty else { return }
-                // 当前集必须在剧列表里，才能确定「之后」是哪些集
-                guard let curIdx = vids.firstIndex(of: curVid) else {
-                    DiagnosticsLogger.log("整剧展开跳过：当前集不在剧列表 series=\(seriesId)",
-                                          category: "playback", level: .info)
-                    return
-                }
+                self.seriesEpisodes[seriesId] = vids
                 self.expandedSeries.insert(seriesId)
-                let later = Array(vids[(curIdx + 1)...])
-                // 去掉 feed 去重集里已有的（避免和后续推荐流重复）
-                let fresh = later.filter { !self.seenVids.contains($0) }
-                guard !fresh.isEmpty else { return }
-                let title = detail.name ?? cur.title
-                let cover = detail.coverURL ?? cur.thumbURL
-                var newItems: [DramaItem] = []
-                for (k, v) in fresh.enumerated() {
-                    // 第 k+1 个 fresh 对应剧里第 curIdx+1+k 集（1-based 编号）
-                    let epNo = curIdx + 1 + k + 1
-                    newItems.append(DramaItem(
-                        bookId: nil, videoId: v, seriesId: seriesId,
-                        title: title.map { "第 \(epNo) 集 · \($0)" } ?? "第 \(epNo) 集",
-                        thumbURL: cover, description: nil,
-                        category: nil, playCount: nil, score: nil))
-                    self.seenVids.insert(v)
-                }
-                // 当前 index 可能已变（用户快速滑动），重算插入点，保证仍紧跟当前集
-                let at = min(self.index + 1, self.items.count)
-                self.items.insert(contentsOf: newItems, at: at)
-                DiagnosticsLogger.log("推荐流整剧展开 series=\(seriesId)《\(title ?? "?")》"
-                                      + " 本剧集号=\(curIdx + 1) 注入后续 \(newItems.count) 集@\(at)，"
-                                      + "feed 总数 \(self.items.count)",
+                DiagnosticsLogger.log("整剧展开（仅缓存）series=\(seriesId) 共 \(vids.count) 集，当前集在列表=\(vids.contains(curVid))",
                                       category: "playback", level: .info)
-                self.onItemsInserted?(at, newItems.count)
             } catch {
                 DiagnosticsLogger.warn("整剧展开失败 series=\(seriesId): \(error.localizedDescription)",
                                        category: "playback")
             }
         }
+    }
+
+    /// 剧内「下一集」vid：按当前实际播放的 vid 在本剧集列表里的位置取下一个。
+    /// 没有下一集（本剧播完）返回 nil → autoAdvance 才续接 feed 下一部剧。
+    func nextEpisodeInCurrentSeries() -> String? {
+        guard let cur = currentDrama,
+              let seriesId = cur.seriesId, !seriesId.isEmpty,
+              let eps = seriesEpisodes[seriesId], !eps.isEmpty
+        else { return nil }
+        let playing = vid(at: index) ?? cur.videoId ?? ""
+        guard let pos = eps.firstIndex(of: playing), pos + 1 < eps.count else { return nil }
+        return eps[pos + 1]
+    }
+
+    /// 剧内换集：把当前 index 的实际播放 vid 覆盖成 next（不滚动、不改 index、不插 items）。
+    /// 换了集要重置首帧标记，让控制器等新集首帧渲染（进度条/自动隐藏计时按新集重来）。
+    func setEpisodeOverride(vid: String) {
+        episodeOverride[index] = vid
+        firstFrameReady = false
+    }
+
+    /// 清除某 index 的剧内覆盖（滑到别的剧时调用，避免残留覆盖串味）。
+    func clearEpisodeOverride(index i: Int) {
+        episodeOverride.removeValue(forKey: i)
     }
 
     /// 同步预取（居中时触发，不等结果；真正切集前 autoAdvance 会 await 一次确保就绪）。
@@ -362,8 +374,10 @@ final class PlaybackEngine {
         guard !items.isEmpty else { return }
         let clamped = min(max(0, i), items.count - 1)
         let changed = clamped != index
-        index = clamped
         if changed {
+            // 滑到别的剧：清掉上一个 index 的剧内换集覆盖，避免残留串味到新剧。
+            episodeOverride.removeValue(forKey: index)
+            index = clamped
             firstFrameReady = false
             let vid = currentDrama?.videoId ?? "?"
             DiagnosticsLogger.log("居中切到 index=\(index) vid=\(vid)", category: "playback", level: .info)
@@ -414,6 +428,11 @@ final class PlaybackEngine {
     func isFailedVid(_ vid: String?) -> Bool {
         guard let vid else { return false }
         return failedVids.contains(vid)
+    }
+
+    /// 记入失败名单（剧内换集取流失败时，跳过该集续接下一部剧）。
+    func markFailedVid(_ vid: String) {
+        failedVids.insert(vid)
     }
 
     /// 从 i 出发向后（forwardOnly）或双向寻找最近的可播 index。

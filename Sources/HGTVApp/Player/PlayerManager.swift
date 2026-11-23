@@ -134,6 +134,31 @@ final class PlayerManager {
         }
     }
 
+    // MARK: - 剧内换集（同 index 换 vid，不滚动、不重建 player）
+
+    /// 把 index 处已存在的 player 换成播另一个 vid（同剧下一集）。
+    /// 复用池里这个 player（不驱逐不重建），只 replaceCurrentItem + 重装 item 观察者。
+    /// 返回 false = 该 index 没有 player 或取流失败（调用方据此跳下一部剧）。
+    func swapItem(at index: Int, vid: String) async -> Bool {
+        guard let player = players[index] else { return false }
+        do {
+            let url = try await resolve(vid)
+            let item = AVPlayerItem(asset: AVURLAsset(url: url))
+            item.preferredForwardBufferDuration = 8
+            item.audioTimePitchAlgorithm = .timeDomain
+            // 重装 item 观察者（旧的观察的是被换掉的 item，必须先摘）
+            removeObservers(index: index)
+            player.replaceCurrentItem(with: item)
+            installObservers(index: index, player: player, item: item)
+            DiagnosticsLogger.log("剧内换集 swapItem index=\(index) vid=\(vid)", category: "playback", level: .info)
+            return true
+        } catch {
+            DiagnosticsLogger.warn("剧内换集失败 index=\(index) vid=\(vid): \(error.localizedDescription)",
+                                   category: "playback")
+            return false
+        }
+    }
+
     // MARK: - 驱逐
 
     /// 必须置空 item —— 让系统回收解码器（防黑屏关键）。

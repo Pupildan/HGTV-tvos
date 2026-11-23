@@ -24,6 +24,15 @@ public enum PCBridge {
     public static let host = "192.168.10.120"
     public static let port: UInt16 = 51901
 
+    /// ATV 启动时打一枪：让 NAS 桥触发一轮原版 app 冷启动 + 翻页，刷新 landpage 池。
+    /// 桥立即回 ok（异步驱动，不阻塞），失败无感忽略——feed 仍走已有池子。
+    /// 一天最多几次（开关 ATV 次数），不会风控。
+    public static func bump() async {
+        guard let sendData = try? JSONSerialization.data(
+            withJSONObject: ["action": "bump"], options: [.sortedKeys]) + [0x0A] else { return }
+        _ = try? await sendAndRead(sendData)
+    }
+
     /// 走 NAS 桥代理拉 feed：桥用预存的手机真签名重放 landpage，返回官方真实响应。
     /// 协议：{"action":"feed"} → {status, body_b64, error}
     public static func fetchFeed() async throws -> Data {

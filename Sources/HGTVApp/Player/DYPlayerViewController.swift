@@ -162,19 +162,19 @@ final class DYPlayerViewController: UIViewController {
         engine.onFeedRestored = { [weak self] in
             self?.handleFeedRestored()
         }
-        // 推荐流整剧展开（v新）：本集后面插入了本剧后续集，精确增量插入 cell，不打断播放
-        engine.onItemsInserted = { [weak self] at, count in
-            self?.handleItemsInserted(at: at, count: count)
+        // 剧内换集（v新）：同 index 换 vid（不滚动），重新 bind 该 cell（弹幕/首帧）
+        engine.onEpisodeSwapped = { [weak self] index in
+            self?.handleEpisodeSwapped(index: index)
         }
     }
 
-    /// 推荐流整剧展开回调：在 at 位置精确插入 count 个 cell（当前集后面）。
-    /// 用 performBatchUpdates 精确插入，避免 syncItemCount 的尾部追加把中间插入算错位。
-    private func handleItemsInserted(at: Int, count: Int) {
-        guard let cv = collectionView, count > 0 else { return }
-        let paths = (at..<(at + count)).map { IndexPath(item: $0, section: 0) }
-        cv.performBatchUpdates { cv.insertItems(at: paths) }
-        DiagnosticsLogger.log("整剧展开插入 \(count) 个 cell@\(at) → 共 \(engine.itemCount)",
+    /// 剧内换集回调：index 未变、滚动未动，只是该 cell 的 player 换了集。
+    /// 重新 bind（弹幕按新 vid 取数 + 首帧回调），cell 复用不重建。
+    private func handleEpisodeSwapped(index: Int) {
+        guard let cell = collectionView?.cellForItem(at: IndexPath(item: index, section: 0)) as? PlayerCell,
+              let player = manager.peekPlayer(at: index) else { return }
+        bind(cell: cell, at: index, player: player)
+        DiagnosticsLogger.log("剧内换集重新 bind index=\(index) vid=\(engine.vid(at: index) ?? "?")",
                               category: "playback", level: .info)
     }
 
@@ -245,23 +245,51 @@ final class DYPlayerViewController: UIViewController {
     }
 
     /// 自动切下一集（通知/轮询共用入口）。3s 去重防止双路径重复触发。
-    /// 关键：切集前先 await 本剧整剧展开完成，确保「本剧下一集」已注入到当前集后面，
-    /// nearestPlayableIndex 才会命中本剧下一集而不是 feed 里的下一部剧（修复异步竞争）。
+    /// 需求：①播完一整集 → 自动切**本剧**下一集（剧内换集，不滚动、不改 index）；
+    ///      ②本剧播完 → 才续接 feed 下一部剧（scrollTo，切到不同剧）。
+    /// 上下滑永远只在不同剧间移动（items 只放不同剧），与剧内换集完全解耦。
     private func autoAdvance() {
         guard Date().timeIntervalSince(lastAutoAdvanceAt) > 3 else { return }
         lastAutoAdvanceAt = Date()
         Task { [weak self] in
             guard let self else { return }
-            // 先确保当前剧的后续集已就位（已展开则秒回；未展开则等红果拉取完成）
+            // 确保本剧集数已就位（已展开则秒回；未展开则等红果拉取完成）
             await self.engine.expandSeriesIfNeeded()
             guard Date().timeIntervalSince(self.lastAutoAdvanceAt) > 3 else { return }
-            if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
-                DiagnosticsLogger.log("播完自动切下一集 index=\(next) vid=\(self.engine.vid(at: next) ?? "?")",
-                                      category: "playback", level: .info)
+
+            // ① 本剧还有下一集 → 剧内换集：同 index 换 vid，不滚动、不改 index
+            if let nextVid = self.engine.nextEpisodeInCurrentSeries() {
                 self.lastAutoAdvanceAt = Date()
-                self.scrollTo(index: next, animated: true)
-            } else {
-                // 向前无可播：补一批 feed 后再试（本剧看完自动续接推荐流）
+                let idx = self.engine.index
+                let swapped = await self.manager.swapItem(at: idx, vid: nextVid)
+                if swapped {
+                    self.engine.setEpisodeOverride(vid: nextVid)
+                    self.engine.onEpisodeSwapped?(idx)
+                    DiagnosticsLogger.log("播完切本剧下一集 index=\(idx) vid=\(nextVid)（不滚动）",
+                                          category: "playback", level: .info)
+                } else {
+                    // 换集失败（取流失败）：记入失败名单，续接 feed 下一部剧
+                    self.engine.markFailedVid(nextVid)
+                    self.advanceToNextDrama()
+                }
+                return
+            }
+
+            // ② 本剧播完 → 续接 feed 下一部剧（切到不同剧）
+            self.advanceToNextDrama()
+        }
+    }
+
+    /// 本剧播完：续接 feed 下一部剧（向前找最近可播；没有了补一批 feed 再试）。
+    private func advanceToNextDrama() {
+        if let next = engine.nearestPlayableIndex(after: engine.index, forwardOnly: true) {
+            lastAutoAdvanceAt = Date()
+            DiagnosticsLogger.log("本剧播完，切下一部剧 index=\(next) vid=\(engine.vid(at: next) ?? "?")",
+                                  category: "playback", level: .info)
+            scrollTo(index: next, animated: true)
+        } else {
+            Task { [weak self] in
+                guard let self else { return }
                 await self.loadMoreAndSync()
                 guard Date().timeIntervalSince(self.lastAutoAdvanceAt) > 3 else { return }
                 if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
