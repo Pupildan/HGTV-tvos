@@ -86,6 +86,31 @@ public actor DanmakuService {
         DiagnosticsLogger.log("🔍 [弹幕诊断] fetchAll() 开始获取：duration=\(durationMs > 0 ? durationMs : Self.fallbackDurationMs)ms",
                               category: "danmaku", level: .info)
 
+        // ── NAS 桥数据源（2026-11-23）─────────────────────────────────────────
+        // 自签 commentapi 恒 110001（设备身份门控），改走桥：桥被动读 redroid 原版 app
+        // 的 commentapi dump（原版活身份+native 签名拿到真弹幕），按 vid 缓存。
+        // 桥一次性返回该 vid 全量弹幕，无需 30s 窗口循环。
+        if PCBridge.isEnabled {
+            do {
+                let items = try await PCBridge.fetchDanmaku(vid: vid)
+                let sorted = items.sorted { $0.offsetMs < $1.offsetMs }
+                if !sorted.isEmpty {
+                    if let onSegment {
+                        await MainActor.run { onSegment(sorted) }
+                    }
+                }
+                DiagnosticsLogger.log("🔍 [弹幕诊断] fetchAll() 桥返回 vid=\(vid) 条数=\(sorted.count)",
+                                      category: "danmaku", level: .info)
+                cache[vid] = sorted
+                return sorted
+            } catch {
+                DiagnosticsLogger.warn("弹幕桥取数失败 vid=\(vid)：\(error.localizedDescription)",
+                                       category: "danmaku")
+                cache[vid] = []
+                return []
+            }
+        }
+
         let duration = durationMs > 0 ? durationMs : Self.fallbackDurationMs
         var merged: [DanmakuMessage] = []
         var seen = Set<String>()

@@ -278,16 +278,33 @@ final class PlaybackEngine {
     /// 当前条目若属于某部剧（有 seriesId）且尚未展开，则拉红果 web 全量 vid_list，
     /// 把「本集之后」的集数插到当前条目紧后面。这样播完当前集，autoAdvance 的
     /// nearestPlayableIndex 自然命中本剧下一集（无缝连播），本剧播完才续接原推荐流。
-    /// 幂等：同 series 只展开一次；进行中用 inflightExpansions 去重。
-    func expandSeriesIfNeeded() {
+    /// 幂等：同 series 只展开一次；进行中复用同一个任务（不重复拉红果）。
+    ///
+    /// 返回：本剧是否已「就绪可连播下一集」（已展开，或本次展开成功且后面还有集）。
+    /// autoAdvance 切集前 await 它，避免异步竞争——否则剧还没拉回来就切到了 feed 下一部剧。
+    @discardableResult
+    func expandSeriesIfNeeded() async -> Bool {
         guard let cur = currentDrama,
               let seriesId = cur.seriesId, !seriesId.isEmpty,
               let curVid = cur.videoId, !curVid.isEmpty
-        else { return }
-        guard !expandedSeries.contains(seriesId) else { return }
-        guard inflightExpansions[seriesId] == nil else { return }
+        else { return false }
+        // 已展开过：直接视为就绪（后续集早已插在当前集后面）
+        if expandedSeries.contains(seriesId) { return true }
+        // 复用进行中的任务，避免并发重复拉取
+        let task: Task<Void, Never>
+        if let existing = inflightExpansions[seriesId] {
+            task = existing
+        } else {
+            task = makeSeriesExpansionTask(seriesId: seriesId, curVid: curVid, cur: cur)
+            inflightExpansions[seriesId] = task
+        }
+        await task.value
+        return expandedSeries.contains(seriesId)
+    }
 
-        let task = Task { [weak self] in
+    /// 构造「拉整剧 + 注入本集后续集」的任务体（不做去重判断，由调用方负责幂等）。
+    private func makeSeriesExpansionTask(seriesId: String, curVid: String, cur: DramaItem) -> Task<Void, Never> {
+        return Task { [weak self] in
             guard let self else { return }
             defer { self.inflightExpansions[seriesId] = nil }
             do {
@@ -331,7 +348,11 @@ final class PlaybackEngine {
                                        category: "playback")
             }
         }
-        inflightExpansions[seriesId] = task
+    }
+
+    /// 同步预取（居中时触发，不等结果；真正切集前 autoAdvance 会 await 一次确保就绪）。
+    func prefetchSeriesExpansion() {
+        Task { [weak self] in _ = await self?.expandSeriesIfNeeded() }
     }
 
     // MARK: - 居中对齐（唯一真相源）
@@ -346,6 +367,9 @@ final class PlaybackEngine {
             firstFrameReady = false
             let vid = currentDrama?.videoId ?? "?"
             DiagnosticsLogger.log("居中切到 index=\(index) vid=\(vid)", category: "playback", level: .info)
+            // 推荐流整剧连播：一居中到某部剧就后台预取本剧后续集（不阻塞居中）。
+            // 真正切集前 autoAdvance 会再 await 一次确保就绪，避免异步竞争切到 feed 下一部剧。
+            prefetchSeriesExpansion()
         }
         if index >= items.count - 5 {
             onNeedMore?()
@@ -424,8 +448,6 @@ final class PlaybackEngine {
                 DiagnosticsLogger.log("NAS 桥 play 成功 vid=\(vid) url=\(cdnUrl.absoluteString)", category: "playback", level: .info)
                 // 桥已解密，返回的是明文 mp4 URL，AVPlayer 直接播
                 urlCache[vid] = cdnUrl
-                // 推荐流整剧连播：当前集取到播放地址后，后台按 seriesId 展开本剧后续集
-                expandSeriesIfNeeded()
                 return cdnUrl
             } catch {
                 DiagnosticsLogger.warn("NAS 桥 play 失败: \(error.localizedDescription)，回退自签解密", category: "playback")

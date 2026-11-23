@@ -245,16 +245,23 @@ final class DYPlayerViewController: UIViewController {
     }
 
     /// 自动切下一集（通知/轮询共用入口）。3s 去重防止双路径重复触发。
+    /// 关键：切集前先 await 本剧整剧展开完成，确保「本剧下一集」已注入到当前集后面，
+    /// nearestPlayableIndex 才会命中本剧下一集而不是 feed 里的下一部剧（修复异步竞争）。
     private func autoAdvance() {
         guard Date().timeIntervalSince(lastAutoAdvanceAt) > 3 else { return }
         lastAutoAdvanceAt = Date()
-        if let next = engine.nearestPlayableIndex(after: engine.index, forwardOnly: true) {
-            DiagnosticsLogger.log("播完自动切下一集 index=\(next)", category: "playback", level: .info)
-            scrollTo(index: next, animated: true)
-        } else {
-            // 向前无可播：补一批 feed 后再试（剧集连播看完自动续接推荐流）
-            Task { [weak self] in
-                guard let self else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            // 先确保当前剧的后续集已就位（已展开则秒回；未展开则等红果拉取完成）
+            await self.engine.expandSeriesIfNeeded()
+            guard Date().timeIntervalSince(self.lastAutoAdvanceAt) > 3 else { return }
+            if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {
+                DiagnosticsLogger.log("播完自动切下一集 index=\(next) vid=\(self.engine.vid(at: next) ?? "?")",
+                                      category: "playback", level: .info)
+                self.lastAutoAdvanceAt = Date()
+                self.scrollTo(index: next, animated: true)
+            } else {
+                // 向前无可播：补一批 feed 后再试（本剧看完自动续接推荐流）
                 await self.loadMoreAndSync()
                 guard Date().timeIntervalSince(self.lastAutoAdvanceAt) > 3 else { return }
                 if let next = self.engine.nearestPlayableIndex(after: self.engine.index, forwardOnly: true) {

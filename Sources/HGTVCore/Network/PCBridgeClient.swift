@@ -77,6 +77,44 @@ public enum PCBridge {
         return url
     }
 
+    /// 走 NAS 桥取某 vid 的弹幕。桥被动读 redroid 原版 app 的 commentapi dump（原版用活身份+
+    /// native 签名拉到真弹幕），按 vid 缓存；ATV 播同 vid 直接命中。
+    /// 协议：{"action":"danmaku","vid":"..."} → {status, body_b64}，body={items:[{id,offset_ms,text}],count}
+    /// 桥未命中/该 vid 无弹幕时返回空数组（不报错）。
+    public static func fetchDanmaku(vid: String) async throws -> [DanmakuMessage] {
+        let payload: [String: Any] = ["action": "danmaku", "vid": vid]
+        let sendData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) + [0x0A]
+        let respData = try await sendAndRead(sendData)
+        guard let obj = try? JSONSerialization.jsonObject(with: respData, options: []) as? [String: Any] else {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -6,
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS danmaku 响应解析失败"]))
+        }
+        if let err = obj["error"] as? String, !err.isEmpty {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -7,
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS danmaku 失败: \(err)"]))
+        }
+        let status = obj["status"] as? Int ?? 0
+        guard status == 200 else {
+            throw HTTPError.catalogHTTP(status)
+        }
+        guard let b64 = obj["body_b64"] as? String, let data = Data(base64Encoded: b64) else {
+            throw HTTPError.network(NSError(domain: "PCBridge", code: -8,
+                                            userInfo: [NSLocalizedDescriptionKey: "NAS danmaku 响应体解码失败"]))
+        }
+        // body = {"items":[{"id","offset_ms","text"}], "count":N}
+        guard let bodyObj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+              let items = bodyObj["items"] as? [[String: Any]] else {
+            return []
+        }
+        var out: [DanmakuMessage] = []
+        for it in items {
+            guard let id = it["id"] as? String, let text = it["text"] as? String, !text.isEmpty else { continue }
+            let off = (it["offset_ms"] as? NSNumber)?.doubleValue ?? 0
+            out.append(DanmakuMessage(id: id, offsetMs: off, text: text))
+        }
+        return out
+    }
+
     public struct Response {
         public let status: Int
         public let data: Data

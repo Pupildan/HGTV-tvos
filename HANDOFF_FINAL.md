@@ -321,3 +321,41 @@ landpage host=api5-normal-lf.fqnovel.com 返回 0 字节
   - v81 ATV 签名原样 → **0B** ✗
   - 用标准 SM3 复算真机 PB 的 envelope → **19/20 逐字节复现真机 x-medusa**（1 个疑为日志截断）
   - **只在 PC 上把 v81 PB 的 field14 改成标准 SM3 值再重放 → 仍 0B**：说明 SM3 错误污染的是整条链（qh→selector/dgst/field13/field14 + flags f1/f2 + envelope 的 obscure digest），单点打补丁不够，必须完整重编译 v82。
+
+## 转向 PC 桥（2026-11-23 14:20 · v83 后）
+
+- **v83 实测**：SM3 FF 修复 80/80 全部生效（field14 == 标准 SM3(query)[:6]），但 landpage 仍 4 host × 全部身份 200+0B。**静态复刻路彻底到头**——medusa 还有 SM3 之外的服务端隐藏校验，不在 APK 内。
+- **用户决策**：主攻 PC 搭桥（PC 重放手机真签名已实测稳定出 377KB）。
+- **PC 桥方案 v1（feed 代理）**：
+  - PC 端 `pc_bridge_service.py`（`/c/apktool_work/`，端口 51900）：收到 `{"action":"feed"}` → 用预存的手机真签名 `replay_request.json` 重放官方 landpage → 返回真实 JSON（自检 377,667B，TCP 协议链路已通）。5 分钟缓存。
+  - ATV 端：`PCBridge.isEnabled=true`，新增 `PCBridge.fetchFeed()`；`APIService.fetchLandpage` 首页改走 PC 桥，失败回退直连。PC IP `192.168.10.122`（已核对）。
+  - 提交 `f53e1c7`，CI run#176 构建 v84 中。
+  - **注意**：此方案只解决 feed（推荐流）；播放取流 `multi_video_model` 的 body 是 gzip 且绑 vid，无法用固定抓包重放，**需要真机现场签名代理**（手机常连 PC，hook 接收请求→真机 native 签名→代发）才能覆盖播放。用户已选"真机现场签名代理"为方向，本轮 feed 代理是第一步。
+- **PC 桥服务必须常驻**（后台任务随会话结束可能被回收，需按需重启）。
+
+## 定论（2026-11-23 16:56 · 用户拍板）
+
+### 1. 自签路线：正式搁置（资源全保留，勿删）
+- v56→v85 共 30 轮静态复刻（五头算法逐字节复现、身份统一、版本族对齐、SM3 修复）全部完成，landpage 仍恒定 `200 + 4B` 空响应（16:52 v85 实测 `bytes=4`）。
+- 结论：medusa 存在 APK 之外的**服务端隐藏校验**，静态路无法收敛，无可控反馈回路。
+- **处置**：代码、签名 PB、抓包、脚本、文档等全部资产**保留不删**，未来若拿到真机 native 签名中间值可复用（见 HANDOFF_FINAL「四、遗留资产」）。仅停止继续投入。
+
+### 2. PC 桥（192.168.10.122:51900）：能取数但不可用
+- 16:51 实测：桥重放 landpage 稳定出 **377,773B 真实数据**，ATV 端 `PC桥兜底 feed 成功 100 条`——取数通路 OK。
+- **致命缺陷**：只解决推荐流 feed（能出剧列表），**播放取流放不了**；且界面**会自动往下刷**（无法稳定停留播放）。PC 还非常驻、IP 会变。
+- **处置**：PC 桥仅作临时验证手段，**不作最终方案**。
+
+### 3. 最终架构：NAS 搭桥（已确认，ATV 纯前端）
+职责切分固定如下，后续工作以此为准：
+- **NAS（飞牛 FnOS，Debian）**：
+  - 跑 **redroid 云手机**，内装**改过的原版 APK**（hook 版）作为**现场签名机**——由真实安卓 native 环境产出合法 medusa PB，覆盖 feed + 播放取流（解决 PC 桥「固定抓包重放不了播放」的死结）。
+  - 跑 **搭桥脚本**（`nas-bridge/bridge_service.py`，端口 51900）：接收 ATV 请求 → 让 redroid 现场签名 → 代发官方 → 回传数据。NAS 常在线、IP 固定，`--restart always` 常驻。
+- **ATV**：**纯前端**。只负责显示 + 播放，所有签名/取数/取流都交给 NAS，自身不做签名。
+- **redroid 部署**：`nas-bridge/redroid/redroid.yml`（镜像 `erstt/redroid:12.0.0_houdini_WSA`，带 houdini ARM 转译，端口 5555 adb + 51900 桥）、`redroid/验证步骤.md`。
+- **改过的原版 APK**：`medusa-hook-v5-signed.apk` 等（见项目根目录），App 启动入口 `com.hgtv.star.LaunchActivity`。
+- **ATV 端待改**：`PCBridgeClient.host`（`Sources/HGTVCore/Network/PCBridgeClient.swift:24`，现为 `192.168.10.122`）需改成 NAS 的固定局域网 IP；`nas-bridge/部署说明.md` 已记录此改法。
+
+### 下一步（接手即做）
+1. 在 NAS 上拉起 redroid（装改过的原版 APK）+ `bridge_service.py`，按 `redroid/验证步骤.md` 验证现场签名出数据（landpage >100KB = 签名机可用）。
+2. ATV 端 `PCBridgeClient.host` 改成 NAS IP，重建一版装真机。
+3. 验证 feed + 播放取流全链路（现场签名应能覆盖播放，这是相对 PC 桥的关键升级）。
