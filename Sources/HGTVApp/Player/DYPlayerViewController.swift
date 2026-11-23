@@ -162,6 +162,20 @@ final class DYPlayerViewController: UIViewController {
         engine.onFeedRestored = { [weak self] in
             self?.handleFeedRestored()
         }
+        // 推荐流整剧展开（v新）：本集后面插入了本剧后续集，精确增量插入 cell，不打断播放
+        engine.onItemsInserted = { [weak self] at, count in
+            self?.handleItemsInserted(at: at, count: count)
+        }
+    }
+
+    /// 推荐流整剧展开回调：在 at 位置精确插入 count 个 cell（当前集后面）。
+    /// 用 performBatchUpdates 精确插入，避免 syncItemCount 的尾部追加把中间插入算错位。
+    private func handleItemsInserted(at: Int, count: Int) {
+        guard let cv = collectionView, count > 0 else { return }
+        let paths = (at..<(at + count)).map { IndexPath(item: $0, section: 0) }
+        cv.performBatchUpdates { cv.insertItems(at: paths) }
+        DiagnosticsLogger.log("整剧展开插入 \(count) 个 cell@\(at) → 共 \(engine.itemCount)",
+                              category: "playback", level: .info)
     }
 
     /// 居中条目取流失败：就近跳到可播条目（双向），避免停留在只有封面的死页。

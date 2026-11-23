@@ -42,6 +42,8 @@ final class PlaybackEngine {
     var onDataReplaced: ((Int) -> Void)?
     /// 从剧集连播返回推荐流后触发，控制器据此整表 reload 并回到第 0 条。
     var onFeedRestored: (() -> Void)?
+    /// 推荐流整剧展开后触发(at, count)：控制器增量插入 cell，不打断当前播放/滚动。
+    var onItemsInserted: ((Int, Int) -> Void)?
 
     private var seenVids: Set<String> = []
     /// landpage 翻页游标（成功接入后 loadMore 续页）。
@@ -51,6 +53,10 @@ final class PlaybackEngine {
     private var landpageActive = false
     /// 已确认拿不到播放地址的 vid（如电影）。resolve 失败时记录，用于自动跳过。
     private var failedVids: Set<String> = []
+    /// 已展开过整剧的 series_id（推荐流连播，防重复拉红果）。
+    private var expandedSeries: Set<String> = []
+    /// 进行中的整剧展开任务（series_id → task），防并发重复拉取。
+    private var inflightExpansions: [String: Task<Void, Never>] = [:]
 
     // MARK: - 本地代理缓存（vid → 解密后明文的本地 URL）
 
@@ -267,6 +273,67 @@ final class PlaybackEngine {
                               category: "playback", level: .info)
     }
 
+    // MARK: - 推荐流整剧连播（v新：刷到短剧自动衔接本剧下一集）
+
+    /// 当前条目若属于某部剧（有 seriesId）且尚未展开，则拉红果 web 全量 vid_list，
+    /// 把「本集之后」的集数插到当前条目紧后面。这样播完当前集，autoAdvance 的
+    /// nearestPlayableIndex 自然命中本剧下一集（无缝连播），本剧播完才续接原推荐流。
+    /// 幂等：同 series 只展开一次；进行中用 inflightExpansions 去重。
+    func expandSeriesIfNeeded() {
+        guard let cur = currentDrama,
+              let seriesId = cur.seriesId, !seriesId.isEmpty,
+              let curVid = cur.videoId, !curVid.isEmpty
+        else { return }
+        guard !expandedSeries.contains(seriesId) else { return }
+        guard inflightExpansions[seriesId] == nil else { return }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer { self.inflightExpansions[seriesId] = nil }
+            do {
+                let detail = try await HongguoWeb.fetchSeriesDetail(seriesId: seriesId)
+                let vids = detail.vidList
+                guard !vids.isEmpty else { return }
+                // 当前集必须在剧列表里，才能确定「之后」是哪些集
+                guard let curIdx = vids.firstIndex(of: curVid) else {
+                    DiagnosticsLogger.log("整剧展开跳过：当前集不在剧列表 series=\(seriesId)",
+                                          category: "playback", level: .info)
+                    return
+                }
+                self.expandedSeries.insert(seriesId)
+                let later = Array(vids[(curIdx + 1)...])
+                // 去掉 feed 去重集里已有的（避免和后续推荐流重复）
+                let fresh = later.filter { !self.seenVids.contains($0) }
+                guard !fresh.isEmpty else { return }
+                let title = detail.name ?? cur.title
+                let cover = detail.coverURL ?? cur.thumbURL
+                var newItems: [DramaItem] = []
+                for (k, v) in fresh.enumerated() {
+                    // 第 k+1 个 fresh 对应剧里第 curIdx+1+k 集（1-based 编号）
+                    let epNo = curIdx + 1 + k + 1
+                    newItems.append(DramaItem(
+                        bookId: nil, videoId: v, seriesId: seriesId,
+                        title: title.map { "第 \(epNo) 集 · \($0)" } ?? "第 \(epNo) 集",
+                        thumbURL: cover, description: nil,
+                        category: nil, playCount: nil, score: nil))
+                    self.seenVids.insert(v)
+                }
+                // 当前 index 可能已变（用户快速滑动），重算插入点，保证仍紧跟当前集
+                let at = min(self.index + 1, self.items.count)
+                self.items.insert(contentsOf: newItems, at: at)
+                DiagnosticsLogger.log("推荐流整剧展开 series=\(seriesId)《\(title ?? "?")》"
+                                      + " 本剧集号=\(curIdx + 1) 注入后续 \(newItems.count) 集@\(at)，"
+                                      + "feed 总数 \(self.items.count)",
+                                      category: "playback", level: .info)
+                self.onItemsInserted?(at, newItems.count)
+            } catch {
+                DiagnosticsLogger.warn("整剧展开失败 series=\(seriesId): \(error.localizedDescription)",
+                                       category: "playback")
+            }
+        }
+        inflightExpansions[seriesId] = task
+    }
+
     // MARK: - 居中对齐（唯一真相源）
 
     /// 控制器滚动停稳后调用：更新 index，接近末尾触发 onNeedMore。
@@ -357,6 +424,8 @@ final class PlaybackEngine {
                 DiagnosticsLogger.log("NAS 桥 play 成功 vid=\(vid) url=\(cdnUrl.absoluteString)", category: "playback", level: .info)
                 // 桥已解密，返回的是明文 mp4 URL，AVPlayer 直接播
                 urlCache[vid] = cdnUrl
+                // 推荐流整剧连播：当前集取到播放地址后，后台按 seriesId 展开本剧后续集
+                expandSeriesIfNeeded()
                 return cdnUrl
             } catch {
                 DiagnosticsLogger.warn("NAS 桥 play 失败: \(error.localizedDescription)，回退自签解密", category: "playback")
