@@ -49,11 +49,12 @@ public enum PCBridge {
         return data
     }
 
-    /// 走 NAS 桥获取视频播放 CDN URL：桥从 redroid logcat 抓预签名 CDN URL。
-    /// 协议：{"action":"play"} → {status, play_url, error}
-    /// 返回可直接用 AVPlayer 播放的 HTTPS URL（预签名，无需额外认证）。
-    public static func fetchPlayUrl() async throws -> URL {
-        let payload: [String: Any] = ["action": "play"]
+    /// 走 NAS 桥获取视频播放地址：桥按 vid 现场取播放地址 + spade_a，
+    /// 下载 CENC 密文 → 解密成明文 → 经 HTTP 代理托管，返回可直接播的明文 URL。
+    /// 协议：{"action":"play","vid":"..."} → {status, play_url, error}
+    /// 返回的 URL 指向 NAS 上的明文 mp4（已解密，AVPlayer 直接播，无需本地解密）。
+    public static func fetchPlayUrl(vid: String) async throws -> URL {
+        let payload: [String: Any] = ["action": "play", "vid": vid]
         let sendData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) + [0x0A]
         let respData = try await sendAndRead(sendData)
         guard let obj = try? JSONSerialization.jsonObject(with: respData, options: []) as? [String: Any] else {

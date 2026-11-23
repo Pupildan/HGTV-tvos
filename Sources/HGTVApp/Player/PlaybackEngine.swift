@@ -350,12 +350,12 @@ final class PlaybackEngine {
     private func doResolve(_ vid: String) async throws -> URL {
         DiagnosticsLogger.log("resolve 开始 vid=\(vid)", category: "playback", level: .info)
 
-        // 1) 优先走 NAS 桥 fetchPlayUrl（直接返回 CDN URL，跳过解密链路）
+        // 1) 优先走 NAS 桥 fetchPlayUrl（按 vid 取址+解密，返回明文 URL，跳过本地解密链路）
         if PCBridge.isEnabled {
             do {
-                let cdnUrl = try await PCBridge.fetchPlayUrl()
+                let cdnUrl = try await PCBridge.fetchPlayUrl(vid: vid)
                 DiagnosticsLogger.log("NAS 桥 play 成功 vid=\(vid) url=\(cdnUrl.absoluteString)", category: "playback", level: .info)
-                // CDN URL 直接可播，无需本地代理
+                // 桥已解密，返回的是明文 mp4 URL，AVPlayer 直接播
                 urlCache[vid] = cdnUrl
                 return cdnUrl
             } catch {
