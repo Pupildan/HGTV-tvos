@@ -142,6 +142,16 @@ public final class SignInterceptor: @unchecked Sendable {
         if landpageFamily {
             // 抓包实锤：原版 landpage query 不带 install_id
             merged.removeValue(forKey: "install_id")
+        } else {
+            // v85：非 landpage 请求的版本号必须与签名 PB 的族保持一致，
+            // 否则出现「query 73532 / 签名 74332」自相矛盾（landpage 用 73532 走 defaults）。
+            let vc = appFamily ? "72232" : "74332"
+            let vn = appFamily ? "7.2.2.32" : "7.4.3.32"
+            merged["version_code"] = vc
+            merged["version_name"] = vn
+            merged["manifest_version_code"] = vc
+            merged["update_version_code"] = vc
+            merged["pv_player"] = vc
         }
 
         // 3) 签名。legacySigning=true 或 V5 总开关关闭时直接走旧 XGorgon。

@@ -14,35 +14,19 @@ enum HCVendor5 {
     static let landpageVersionCode = "73532"
     private static let defaultBuild = "BP2A.250605.031.A3"
 
-    static let device: [String: String] = [
-        "iid": "1905892595382586",
-        "device_id": "1905892595378490",
-        "ac": "wifi",
-        "channel": "update_64",
-        "aid": "8662",
-        "app_name": "novelread",
-        "version_code": "74332",
-        "version_name": "7.4.3.32",
-        "device_platform": "android",
-        "os": "android",
-        "ssmix": "a",
-        "device_type": "25053RT47C",
-        "device_brand": "Redmi",
-        "language": "zh",
-        "os_api": "36",
-        "os_version": "16",
-        "manifest_version_code": "74332",
-        "resolution": "1280*2772",
-        "dpi": "520",
-        "update_version_code": "74332",
-        "host_abi": "arm64-v8a",
-        "dragon_device_type": "phone",
-        "pv_player": "74332",
-        "compliance_status": "0",
-        "need_personal_recommend": "1",
-        "player_so_load": "1",
-        "is_android_pad_screen": "0",
-    ]
+    /// v85 关键修复：设备身份统一为真机那套（CommonParams.defaults），不再单独维护
+    /// 一份 Redmi 假身份（旧 iid=1905892595382586 / device_type=25053RT47C / Redmi）。
+    /// 此前签名 PB 用 Redmi 身份、query 用另一套，服务端看到自相矛盾 → 200+0B。
+    /// 这里只覆盖「视频族」版本号（74332/7.4.3.32），身份字段全部沿用 defaults。
+    static let device: [String: String] = {
+        var v = CommonParams.defaults
+        v["version_code"] = "74332"
+        v["version_name"] = "7.4.3.32"
+        v["manifest_version_code"] = "74332"
+        v["update_version_code"] = "74332"
+        v["pv_player"] = "74332"
+        return v
+    }()
 
     /// App 路径(搜索/分类/账号)的五项版本号改成 72232。
     static let appDevice: [String: String] = {
@@ -321,6 +305,8 @@ final class HCSignerV5: @unchecked Sendable {
         func fInt(_ tag: Int32, _ v: Int64) -> [UInt8] { hcProtoField(tag, .sint(v)) }
         func fStr(_ tag: Int32, _ v: String) -> [UInt8] { hcProtoField(tag, .string(v)) }
         func fFloat(_ tag: Int32, _ v: Float) -> [UInt8] { hcProtoField(tag, .float(v)) }
+        // 注意：本函数为历史遗留死代码（无调用者）。实际 medusa 走
+        // HCSignV5State.generate → HCSignV5Model，field5 = deviceTokenShort（I1.c 派生）。
         return fInt(1, 1) + fInt(2, 7) + fStr(3, "8662") + fStr(4, deviceId(d)) +
             fStr(5, "forged-token") + fStr(6, "forged-256") + fInt(7, 264) +
             fInt(8, 268) + fInt(9, 91) + fInt(10, 276) +

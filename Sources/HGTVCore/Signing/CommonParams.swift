@@ -5,40 +5,61 @@ import Foundation
 
 public enum CommonParams {
     /// R3.a：静态默认 query map
-    /// 设备身份已替换为开发机端到端验证过的真实值（原 APK 注册产物，
-    /// bookmall/tab 实测返回 62KB 真实数据）。旧的红米假设备身份会导致内容接口返空。
+    ///
+    /// v85 关键修复（2026-11-23）：全套设备身份统一为「真机端到端验证过的那一套」
+    /// （来源：手机真机抓包 replay_request.json，PC 重放该请求服务端返回 377KB 真实数据）。
+    /// 此前项目内存在三套互相冲突的身份：
+    ///   - HCVendor5.device        iid=1905892595382586 / Redmi
+    ///   - CommonParams.defaults   iid=4280878733470867 / SM-F7310
+    ///   - 真机                     iid=3093339275814004 / SM-F7310
+    /// 签名（medusa PB）用一套、query 用另一套 → 服务端看到自相矛盾的身份 → 静默 200+0B。
+    /// 现统一为真机这一套，且补齐原先缺失的 11 个字段
+    /// （device_token / openudid / clientudid / cdid / klink_egdi / rom / rom_version /
+    ///   mcc_mnc / carrier / apk_first_install_time / profile-format）。
     public static let defaults: [String: String] = [
-        "iid": "4280878733470867",
-        "device_id": "4280878733466771",
-        "install_id": "4280878733470867",
-        "openudid": "25bc291e06c950fa3431",
-        "cdid": "7868af32-90ad-441e-b1f8-3ef7d1c515ff",
-        "clientudid": "4b59a9f3-d9a9-42ee-b58a-0e0fa13c9ee5",
+        // —— 身份核心 ——
+        "iid": "3093339275814004",
+        "device_id": "3093339275809908",
+        "install_id": "3093339275814004",
+        "device_token": "AAAYR3N2COO6LZJBHO2XYPIAF6M3NSS5J6V7OSEOFUFSMFVJFWBQGUSVJZFM5PGGMP3AEEGH563FYN4VKTTLY5WAHOLP7UAEED32EHYEUP66MQOJY3RKP55U4NLL2",
+        "openudid": "ac052ea31ff8401cba75",
+        "openudid-source": "primary_random",
+        "clientudid": "bd7c0136-435c-471c-86f8-106b851aa357",
+        "cdid": "83bb8199-3cec-48ee-8e35-5c32232928c2",
+        "klink_egdi": "AAKvKdL8rPboP7iOYP2Jh7Lx1-B_-p1lAqjFISZj_7vYL1nm2Kn8Rxo8",
+        "profile-format": "official-v1",
+        // —— 设备档案（必须与签名内 PB 完全一致）——
+        "device_type": "SM-F7310",
+        "device_brand": "samsung",
+        "rom": "F7310ZCS9GZF1",
+        "rom_version": "BP4A.251205.006.F7310ZCS9GZF1",
+        "resolution": "1226*1080",
+        "dpi": "360",
+        "os_api": "36",
+        "os_version": "16",
+        "host_abi": "arm64-v8a",
+        "mcc_mnc": "46011",
+        "carrier": "中国电信",
+        "apk_first_install_time": "1795345419167",
+        // —— 应用/渠道 ——
         "ac": "wifi",
-        "channel": "update_64",
+        "channel": "69310258a",
         "aid": "8662",
         "app_name": "novelread",
-        "version_code": "74332",
-        "version_name": "7.4.3.32",
+        "version_code": "73532",
+        "version_name": "7.3.5.32",
+        "manifest_version_code": "73532",
+        "update_version_code": "73532",
+        "pv_player": "73532",
         "device_platform": "android",
         "os": "android",
         "ssmix": "a",
-        "device_type": "SM-F7310",
-        "resolution": "2546*1080",
+        "language": "zh",
+        "dragon_device_type": "phone",
+        "compliance_status": "0",
         "need_personal_recommend": "1",
         "player_so_load": "1",
         "is_android_pad_screen": "0",
-        "device_brand": "samsung",
-        "language": "zh",
-        "os_api": "36",
-        "os_version": "16",
-        "manifest_version_code": "74332",
-        "dpi": "480",
-        "update_version_code": "74332",
-        "host_abi": "arm64-v8a",
-        "dragon_device_type": "phone",
-        "pv_player": "74332",
-        "compliance_status": "0",
     ]
 
     /// R3.b：机型候选（行 1626-1628）
@@ -50,21 +71,14 @@ public enum CommonParams {
                              iid: String? = nil,
                              installID: String? = nil) -> [String: String] {
         var q = defaults
-        // device_type 保持 defaults 里的已验证值（SM-F7310），不再随机覆盖为红米型号，
-        // 否则会破坏与开发机验证一致的设备指纹导致内容接口返空。
+        // v85：不再在这里硬编码版本号，统一沿用 defaults 的 landpage 族（73532/7.3.5.32）。
+        // 视频族(74332)/App族(72232) 由调用方通过 landpageFamily/appFamily 覆盖，
+        // 否则会出现「query 版本号 74332、签名 PB 版本号 73532」的自相矛盾。
         q["ac"] = "wifi"
-        q["channel"] = "update_64"
         q["aid"] = "8662"
         q["app_name"] = "novelread"
-        q["version_code"] = "74332"
-        q["version_name"] = "7.4.3.32"
-        q["manifest_version_code"] = "74332"
-        q["update_version_code"] = "74332"
-        q["pv_player"] = "74332"
         q["device_platform"] = "android"
         q["os"] = "android"
-        q["os_api"] = "36"
-        q["os_version"] = "16"
         // credentials 为空时保留 defaults 里的已验证设备身份（不再删除导致请求无设备参数）。
         if let v = deviceID { q["device_id"] = v }
         if let v = iid { q["iid"] = v }
@@ -75,7 +89,7 @@ public enum CommonParams {
     /// R3.d：User-Agent
     /// - cronet=true 时带 Cronet/TTNet 后缀（POST 或带 body 请求）
     public static func userAgent(for device: [String: String]?, cronet: Bool) -> String {
-        let vc = device?["version_code"] ?? "74332"
+        let vc = device?["version_code"] ?? "73532"
         let os = device?["os_version"] ?? "16"
         let model = device?["device_type"] ?? "SM-F7310"
         let build = device?["rom_version"] ?? "BP4A.251205.006.F7310ZCS9GZF1"
