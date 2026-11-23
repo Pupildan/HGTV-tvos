@@ -94,7 +94,7 @@ final class PlaybackEngine {
         if PCBridge.isEnabled {
             do {
                 let feedData = try await PCBridge.fetchFeed()
-                let page = try APIService.shared.parseLandpageResponse(feedData)
+                let page = try APIService.parseLandpage(from: feedData, requestOffset: 0, requestSessionId: "")
                 if !page.items.isEmpty {
                     feedOffset = page.nextOffset
                     feedSessionId = page.sessionId
