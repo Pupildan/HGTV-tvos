@@ -2,7 +2,12 @@
 // curl-impersonate TLS 指纹验证辅助：用项目真实 V5 签名链路（SignInterceptor + HCSignerV5，
 // 与 Nbeedp app 完全同路径）生成 landpage 请求，输出 JSON 供 CI 用 curl-impersonate 发送。
 //
-// 用法: sign_cli <output.json>
+// 用法: sign_cli [--transport nio] <output.json>
+//   默认           ：只生成 request.json（curl-impersonate 路径）
+//   --transport nio：生成后用 AsyncHTTPClient（BoringSSL TLS）直接发送 landpage，
+//                    输出 nio_result.json + stdout VERDICT 行。
+//                    需要 SPM 构建（swift build --target SignCLI）；swiftc 直编环境
+//                    （impersonate job）无 AsyncHTTPClient 模块，nio 分支报错退出。
 // 输出: {"url": ..., "headers": {...}, "body_base64": ...(gzip 后 body)}
 //
 // 身份：RealDeviceRegister.presetIdentities[0]（池首 Redmi 23046PNC9C，
@@ -12,16 +17,32 @@
 // + Accept-Encoding: gzip + Content-Type 小写 utf-8，与 test_landpage_v2.py 成功头集合对齐。
 
 import Foundation
+#if canImport(AsyncHTTPClient)
+import AsyncHTTPClient
+import NIOCore
+#endif
 
 @main
 struct SignCLI {
-    static func main() {
-        let args = CommandLine.arguments
-        guard args.count >= 2 else {
-            fputs("usage: sign_cli <output.json>\n", stderr)
+    static func main() async {
+        // 参数解析：[--transport nio] <output.json> [send]
+        var useNIO = false
+        var positional: [String] = []
+        let raw = Array(CommandLine.arguments.dropFirst())
+        var i = 0
+        while i < raw.count {
+            if raw[i] == "--transport", i + 1 < raw.count, raw[i + 1] == "nio" {
+                useNIO = true
+                i += 2
+            } else {
+                positional.append(raw[i])
+                i += 1
+            }
+        }
+        guard let outPath = positional.first else {
+            fputs("usage: sign_cli [--transport nio] <output.json> [send]\n", stderr)
             exit(2)
         }
-        let outPath = args[1]
 
         do {
             let request = try buildSignedRequest()
@@ -36,6 +57,17 @@ struct SignCLI {
                 let names = items.map { $0.name }
                 fputs("  has klink_egdi=\(names.contains("klink_egdi")) ts=\(names.contains("ts")) _rticket=\(names.contains("_rticket"))\n", stderr)
             }
+            #if canImport(AsyncHTTPClient)
+            if useNIO {
+                try await sendViaNIO(request)
+            }
+            #else
+            if useNIO {
+                fputs("sign_cli: --transport nio 需要 SPM 构建（swift build --target SignCLI）；"
+                    + "当前二进制编译时无 AsyncHTTPClient 模块\n", stderr)
+                exit(3)
+            }
+            #endif
         } catch {
             fputs("sign_cli FAILED: \(error)\n", stderr)
             exit(1)
@@ -120,4 +152,40 @@ struct SignCLI {
         let json = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
         try json.write(to: URL(fileURLWithPath: path))
     }
+
+    #if canImport(AsyncHTTPClient)
+    /// AsyncHTTPClient（BoringSSL TLS）直发 landpage——CI 上验证「签名请求 + BoringSSL
+    /// 指纹」整链路（macOS runner 的 AsyncHTTPClient TLS 栈即 BoringSSL）。
+    /// 注意：CI 为海外出口，字节 CDN 地域风控可能仍回 0B——status=200 且 TLS 握手成功
+    /// 即证明指纹未被 TLS 层拦截；真数据需中国出口（真机）验证。
+    static func sendViaNIO(_ r: Output) async throws {
+        fputs("=== send via AsyncHTTPClient (BoringSSL) ===\n", stderr)
+        var cfg = AsyncHTTPClient.HTTPClient.Configuration()
+        cfg.decompression = .enabled(limit: .ratio(50))
+        let client = AsyncHTTPClient.HTTPClient(eventLoopGroupProvider: .singleton,
+                                                configuration: cfg)
+        defer { try? client.syncShutdown() }
+        var req = HTTPClientRequest(url: r.url)
+        req.method = .POST
+        for (k, v) in r.headers { req.headers.add(name: k, value: v) }
+        req.body = .bytes(ByteBuffer(bytes: r.body))
+        let resp = try await client.execute(req, timeout: .seconds(30))
+        var buf = try await resp.body.collect(upTo: 256 * 1024 * 1024)
+        let bytes = buf.readBytes(length: buf.readableBytes) ?? []
+        let head = String(bytes: bytes.prefix(300), encoding: .utf8) ?? ""
+        fputs("NIO-BoringSSL: status=\(resp.status.code) bytes=\(bytes.count)\n", stderr)
+        if !head.isEmpty { fputs("body head: \(head)\n", stderr) }
+        let result: [String: Any] = [
+            "transport": "NIO-BoringSSL",
+            "status": resp.status.code,
+            "bytes": bytes.count,
+            "tls_handshake": "ok",
+            "body_head": head,
+        ]
+        let json = try JSONSerialization.data(withJSONObject: result,
+                                              options: [.prettyPrinted, .sortedKeys])
+        try json.write(to: URL(fileURLWithPath: "nio_result.json"))
+        print("VERDICT: NIO-BoringSSL status=\(resp.status.code) bytes=\(bytes.count)")
+    }
+    #endif
 }

@@ -4,6 +4,15 @@
 #   - HGTVCore  ：数据获取层（签名/设备注册/网络/接口/模型），独立 module，供 app import
 #   - HGTV      ：tvOS app target，编译界面层源码（含 @main 入口），依赖并 embed HGTVCore
 # 直接编译源文件（不依赖 SwiftPM 包），archive 必产出规范 tvOS .app。
+# SPM 依赖（AsyncHTTPClient/BoringSSL）只挂在 HGTVCore framework target 上：
+# Xcode 对 .automatic product 默认静态链接进 HGTVCore.framework，app target 无感。
+packages:
+  AsyncHTTPClient:
+    url: https://github.com/swift-server/async-http-client.git
+    from: 1.22.0
+  swift-nio:
+    url: https://github.com/apple/swift-nio.git
+    from: 2.63.0
 name: HGTV
 options:
   bundleIdPrefix: com.hgtv
@@ -27,6 +36,10 @@ targets:
     platform: tvOS
     sources:
       - Sources/HGTVCore
+    dependencies:
+      # 字节系域名专用传输层（BoringSSL TLS 指纹过墙，见 NIOHTTPTransport.swift）
+      - package: AsyncHTTPClient
+      - package: swift-nio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvos.core

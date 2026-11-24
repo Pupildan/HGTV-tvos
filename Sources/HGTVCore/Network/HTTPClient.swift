@@ -159,6 +159,19 @@ public final class HTTPClient: Sendable {
         Self.logRequest(method: method, url: urlStr, signed: isSigned, headers: headers,
                         bodyLength: signedReq.body?.count)
 
+#if canImport(AsyncHTTPClient)
+        // —— 传输层路由：字节系域名走 NIO-BoringSSL 通道（v93）——
+        // Apple 原生 TLS 指纹（Network.framework JA3）被字节 CDN 黑名单（landpage 恒
+        // 200+0B，五 host × 五身份实测）；2026-11-24 归一实验实锤任何 BoringSSL/OpenSSL
+        // 指纹可过。landpage/弹幕/播放取流等主链路全部切 NIO；其余域名（自建搜索中转
+        // hongguoduanju.com、镜像 luckysf.net）维持 URLSession。
+        if NIOHTTPTransport.shouldUseNIO(host: target.host) {
+            return try await Self.sendViaNIO(url: urlStr, method: method,
+                                             headers: headers,
+                                             body: signedReq.body.map { Data($0) })
+        }
+#endif
+
         // 签名请求一律本地直连 URLSession（v91：原生自签版彻底移除 PC/NAS 桥兜底，
         // 签名已升级突破版参数（3f9d363），landpage/弹幕/播放三接口均验证可通；
         // 失败就抛真实错误，不再有任何桥路径）。
@@ -185,6 +198,41 @@ public final class HTTPClient: Sendable {
         }
         return data
     }
+
+    // MARK: - NIO-BoringSSL 通道（字节系域名专用，v93）
+
+#if canImport(AsyncHTTPClient)
+    /// AsyncHTTPClient（BoringSSL TLS）发送签名请求。响应日志带 channel=NIO-BoringSSL，
+    /// 装机后日志服务器可确认通道切换生效。
+    private static func sendViaNIO(url: String, method: String,
+                                   headers: [String: String],
+                                   body: Data?) async throws -> Data {
+        do {
+            let result = try await NIOHTTPTransport.execute(
+                url: url, method: method, headers: headers, body: body)
+            let preview = String(data: result.data.prefix(500), encoding: .utf8)
+                ?? String(decoding: result.data.prefix(500), as: UTF8.self)
+            DiagnosticsLogger.info(
+                "← \(result.status) bytes=\(result.data.count) channel=NIO-BoringSSL \(url)",
+                category: "http",
+                meta: ["status": "\(result.status)",
+                       "bytes": "\(result.data.count)",
+                       "channel": "NIO-BoringSSL",
+                       "body": preview])
+            guard (200..<300).contains(result.status) else {
+                DiagnosticsLogger.warn("HTTP \(result.status)：\(url)（NIO-BoringSSL）", category: "http")
+                throw HTTPError.catalogHTTP(result.status)
+            }
+            return result.data
+        } catch let e as HTTPError {
+            throw e
+        } catch {
+            DiagnosticsLogger.error("NIO 请求失败：\(error.localizedDescription)", category: "http",
+                                    meta: ["url": url, "channel": "NIO-BoringSSL"])
+            throw HTTPError.network(error)
+        }
+    }
+#endif
 
     // MARK: - 日志挂钩（不影响请求语义，仅观测）
 

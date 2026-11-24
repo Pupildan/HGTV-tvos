@@ -11,6 +11,7 @@ on:
       - 'Scripts/sign_cli.swift'
       - 'Scripts/send_impersonate.py'
       - '.github/workflows/impersonate-test.yml'
+      - 'Package.swift'
   workflow_dispatch:
 
 concurrency:
@@ -78,5 +79,41 @@ jobs:
             body.gz
             resp_*.bin
             hdr_*.txt
+          if-no-files-found: warn
+          retention-days: 7
+  # AsyncHTTPClient（BoringSSL）传输层验证：sign_cli --transport nio 直接在 CI 上发
+  # 签名后的 landpage（V5 签名链路与 app 完全同路径）。macOS runner 的 AsyncHTTPClient
+  # TLS 栈即 BoringSSL——验证「BoringSSL 指纹 + 签名请求」真实过墙（status=200 + TLS
+  # 握手成功 = 指纹未被 TLS 层拦截；海外出口可能因地域风控仍 0B，真数据需中国出口真机）。
+  nio-transport-test:
+    name: AsyncHTTPClient (BoringSSL) transport test
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build SignCLI via SwiftPM (pulls AsyncHTTPClient + BoringSSL)
+        run: |
+          set -o pipefail
+          swift build -c release --target SignCLI 2>&1 | tail -40
+          BIN_PATH="$(swift build -c release --target SignCLI --show-bin-path)"
+          echo "BIN_PATH=$BIN_PATH" >> "$GITHUB_ENV"
+          ls -la "$BIN_PATH/SignCLI"
+
+      - name: Sign + send landpage via NIO (BoringSSL)
+        run: |
+          "$BIN_PATH/SignCLI" --transport nio nio_request.json
+          echo "--- nio_result.json ---"
+          cat nio_result.json || true
+
+      - name: Upload nio-transport-test-result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nio-transport-test-result
+          path: |
+            nio_result.json
+            nio_request.json
           if-no-files-found: warn
           retention-days: 7
