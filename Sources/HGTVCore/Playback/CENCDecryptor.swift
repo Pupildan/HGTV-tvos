@@ -344,7 +344,7 @@ public enum CENCDecryptor {
                 // 主路径（对齐 cenc_sanitize.py _find_sinf）：payload 全范围扫描 sinf
                 if let sinf = findSinf(buf, entryBody, entryEnd) {
                     // frma 是 sinf 第一个子 box（实战观察），data_format 在其 payload 前 4 字节
-                    let sinfBody = sinf.offset + sinf.headerSize
+                    let sinfBody = sinf.offset + 8   // findSinf 返回 (offset,size)，假定标准 8B 头（与内部 frma 校验一致）
                     let sinfEnd = sinf.offset + sinf.size
                     for sub in iterBoxes(buf, sinfBody, sinfEnd) where sub.type == "frma" {
                         let fr = sub.offset + sub.headerSize
