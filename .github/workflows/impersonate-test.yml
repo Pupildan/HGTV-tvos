@@ -95,8 +95,14 @@ jobs:
 
       - name: Build SignCLI via SwiftPM (pulls AsyncHTTPClient + BoringSSL)
         run: |
-          set -o pipefail
-          swift build -c release --target SignCLI 2>&1 | tail -40
+          if ! swift build -c release --target SignCLI > build_signcli.log 2>&1; then
+            echo "=== swift build FAILED — error lines: ==="
+            grep -E "error:" build_signcli.log | head -40 || true
+            echo "=== last 60 lines: ==="
+            tail -60 build_signcli.log
+            exit 1
+          fi
+          echo "=== swift build OK ==="
           BIN_PATH="$(swift build -c release --target SignCLI --show-bin-path)"
           echo "BIN_PATH=$BIN_PATH" >> "$GITHUB_ENV"
           ls -la "$BIN_PATH/SignCLI"
