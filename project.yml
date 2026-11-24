@@ -10,7 +10,9 @@ packages:
   AsyncHTTPClient:
     url: https://github.com/swift-server/async-http-client.git
     from: 1.22.0
-  swift-nio:
+  # key 必须等于 product 名（xcodegen 以 key 作为 XCSwiftPackageProductDependency 的
+  # product 名；swift-nio 包的 product 是 NIOCore，key 写 swift-nio 会报 Missing product）
+  NIOCore:
     url: https://github.com/apple/swift-nio.git
     from: 2.63.0
 name: HGTV
@@ -39,7 +41,7 @@ targets:
     dependencies:
       # 字节系域名专用传输层（BoringSSL TLS 指纹过墙，见 NIOHTTPTransport.swift）
       - package: AsyncHTTPClient
-      - package: swift-nio
+      - package: NIOCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvos.core

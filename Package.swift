@@ -33,7 +33,10 @@ let package = Package(
             ],
             path: "Sources/HGTVCore",
             swiftSettings: [
-                .swiftLanguageMode(.v6)
+                // v5 语义：与 xcodegen 直编路径（-strict-concurrency=minimal）对齐。
+                // v6 严格并发会把 SignInterceptor.useV5 等 static var 判为错误。
+                // 主构建走 xcodegen，不读本设置；本设置只影响 SPM 路径（SignCLI）。
+                .swiftLanguageMode(.v5)
             ]
         ),
         // sign_cli（CI TLS 指纹验证 CLI）：--transport nio 模式用 AsyncHTTPClient
@@ -55,7 +58,7 @@ let package = Package(
                 "signing_verify"
             ],
             swiftSettings: [
-                .swiftLanguageMode(.v6)
+                .swiftLanguageMode(.v5)
             ]
         ),
         // 界面层：tvOS 26 SwiftUI + 液态玻璃 + AVPlayer（@main 入口在此，作为 library 被 app target 链接）
