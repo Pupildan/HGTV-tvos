@@ -1,0 +1,82 @@
+name: Impersonate TLS fingerprint test
+
+# 目的：用项目真实 V5 签名链路（Scripts/sign_cli.swift → SignInterceptor/HCSignerV5）
+# 生成 landpage 请求，再用 curl-impersonate 的 Chrome 指纹模板发送，
+# 验证「字节 CDN 黑名单 Apple TLS 栈 JA3/JA4、OpenSSL/curl 指纹可过」假说。
+# 独立 job：不触碰主构建（build-tvos.yml）的任何步骤。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Scripts/sign_cli.swift'
+      - 'Scripts/send_impersonate.py'
+      - '.github/workflows/impersonate-test.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: impersonate-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  impersonate-test:
+    name: curl-impersonate TLS fingerprint test
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install curl-impersonate (brew) + curl_cffi fallback
+        run: |
+          echo "=== brew install curl-impersonate ==="
+          brew install curl-impersonate || echo "WARN: brew formula curl-impersonate failed, fallback to pip curl_cffi"
+          PREFIX="$(brew --prefix)"
+          echo "=== curl_chrome* wrappers installed ==="
+          ls "$PREFIX/bin" | grep -E '^curl_(chrome|ff|safari|edge)' || echo "(none — release binary fallback skipped, curl_cffi below)"
+          echo "=== curl_cffi (curl-impersonate python binding, chrome131_android template) ==="
+          python3 -m pip install --quiet --upgrade curl_cffi || echo "WARN: curl_cffi install failed"
+          python3 -c "import curl_cffi; print('curl_cffi version:', curl_cffi.__version__)" || true
+
+      - name: Compile sign CLI (swiftc, HGTVCore minimal whole-target)
+        run: |
+          mkdir -p build
+          xcrun swiftc -O -o build/sign_cli Scripts/sign_cli.swift $(find Sources/HGTVCore -name '*.swift' | sort)
+          ls -la build/sign_cli
+
+      - name: Generate signed landpage request
+        run: |
+          ./build/sign_cli request.json
+          python3 - <<'PY'
+          import base64, json
+          d = json.load(open('request.json'))
+          print('URL:', d['url'][:150], '...')
+          print('headers:', sorted(d['headers'].keys()))
+          body = base64.b64decode(d['body_base64'])
+          print('body gz bytes:', len(body))
+          PY
+
+      - name: Send with impersonation templates + verdict
+        run: python3 Scripts/send_impersonate.py
+
+      - name: Print verdict
+        if: always()
+        run: |
+          if [ -f impersonate_result.json ]; then
+            python3 -c "import json; d=json.load(open('impersonate_result.json')); print('VERDICT:', d['verdict']); [print(' ', r) for r in d['results']]"
+          else
+            echo "impersonate_result.json missing — job execution error"
+          fi
+
+      - name: Upload impersonate-test-result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: impersonate-test-result
+          path: |
+            impersonate_result.json
+            request.json
+            body.gz
+            resp_*.bin
+            hdr_*.txt
+          if-no-files-found: warn
+          retention-days: 7
