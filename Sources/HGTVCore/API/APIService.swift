@@ -139,7 +139,12 @@ public final class APIService: Sendable {
             "req_type": isFirst ? "default" : "only_content",
             "client_req_type": 3,
         ]
-        let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let bodyPlain = try JSONSerialization.data(withJSONObject: payload, options: [])
+        // landpage body 必须 gzip：2026-11-24 Nbeedp 实测明文 body 恒 200+0B（五个 host
+        // × 三身份全灭），Python test_landpage_v2 gzip body 4/4 全 200——landpage 服务端
+        // 只解析 gzip body（与 multi_video_model 恰好相反：那边明文才行）。x-ss-stub 与
+        // gorgon 绑定的是 gzip 后字节，签名链拿 target.body 自动对齐。
+        let body = Gzip.compress(bodyPlain)
         // query 版本族覆写（真机抓包 00:38:19 实锤）：landpage 走 73532/7.3.5.32 + channel=69310258a。
         // 这些键在 intercept 里覆盖 CommonParams 的默认值。
         let family: [String: String] = [
