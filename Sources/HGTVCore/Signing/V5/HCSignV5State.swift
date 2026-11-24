@@ -498,27 +498,36 @@ final class HCAutonomousState {
 }
 
 /** Go DefaultAutonomousState:与官方 7.4.3.32 稳定态一致的初始档案。
-    v71：设备字段按身份档案注入——此前硬编码 HONOR VER-AN00/Android 12，
-    与身份注册档案（SM-F7310/samsung/Android 16）不一致；landpage 严格校验
-    medusa 设备字段 × 注册指纹一致性 → 拒绝（0B）。真机 SM-F7310 getprop 实锤。 */
+    v71：设备字段按身份档案注入。2026-11-24 突破版：档案值整体对齐
+    medusa_pb.py live_device/live_identity（landpage 4/4 + 弹幕 87 条实测标准答案）：
+    collectionState=7 / cpuCoreCount=8 / storageRAMGiB=8.0→3.5 递减 / systemVolume=7 /
+    board=product=device=model / manufacturer 按 brand 推导 / hardware=qcom；
+    PB appVersion 跟随 query 版本族（landpage=7.3.5.32 / 弹幕=7.2.2.32）。 */
 func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64, processID: Int32 = 1,
                               profile: [String: String]? = nil) -> HCAutonomousState {
     let p = profile ?? [:]
     let model = p["device_type"] ?? "VER-AN00"
     let brand = p["device_brand"] ?? "HONOR"
-    // 真机 SM-F7310（Galaxy Z Flip5）getprop 实锤：device=b5q product=b5qzcx
-    // board=kalama hardware=qcom。其他机型暂用默认（主用身份即 SM-F7310）。
-    let isFlip5 = model == "SM-F7310"
+    // 突破版：已知 Android 机型（Redmi 23046PNC9C / samsung SM-F7310）的 PB 档案
+    // 照 live_device 同源（board/product/device=model、hardware=qcom）；未知机型
+    // 沿用旧占位值。python: manufacturer = Samsung if samsung else Xiaomi。
+    let isKnownAndroid = model == "23046PNC9C" || model == "SM-F7310"
+    let manufacturer = isKnownAndroid
+        ? (brand.lowercased().contains("samsung") ? "Samsung" : "Xiaomi")
+        : "OnePlus"
     let shortToken = hcMedusaShortToken(deviceToken: token, deviceID: deviceID)
     // v80：root field16 = medusa SDK 初始化时缓存的原始凭据（D1.f1663d = 构造入参 token）。
-    // 真机 hook 实锤身份 C 的该值 = "3hJq-…"（24 字符，非派生值——手机 SDK 缓存旧凭据，无法重算）。
-    // 其他身份无真值，沿用派生短 token。
-    let rawToken = deviceID == "3093339275809908" ? "3hJq-f-tx_fnP44i8TDITXsq" : shortToken
+    // 身份 C 真机 hook 实锤该值 = "3hJq-…"（24 字符，手机 SDK 缓存旧凭据，无法重算）；
+    // 其他身份照 Python live_identity：root16 = 完整 device_token（此前用派生短
+    // token 从未通过端到端验证）。
+    let rawToken = deviceID == "3093339275809908" ? "3hJq-f-tx_fnP44i8TDITXsq" : token
     let identity = HCMedusaIdentity(
         aid: "8662",
         deviceID: deviceID,
         licenseID: "646637794",
-        appVersion: "7.4.3.32",
+        // PB appVersion 必须与 query 版本族一致（v85 同款矛盾根因：query 73532 /
+        // PB 7.4.3.32 自相矛盾）。sign() 的 device dict 恒含 version_name。
+        appVersion: p["version_name"] ?? "7.4.3.32",
         sdkVersion: "v04.10.03.04-bugfix",
         channel: "69310258a",
         token: rawToken,
@@ -526,26 +535,25 @@ func hcDefaultAutonomousState(_ deviceID: String, _ token: String, nowMS: Int64,
         sdkPlatform: "v04.10.03-ml-android",
     )
     let device = HCMedusaDevice(
-        collectionState: 2,
+        collectionState: 7,
         cache256: "!noperm!",
         timezone: "Asia/Shanghai,8",
         locale: "zh_CN",
-        cpuCoreCount: 3,
-        // 真机 float 原始位（hook ground truth），勿改成直觉上的存储容量
-        storageRAMGiB: [Float(bitPattern: 1123679104), Float(bitPattern: 1123272447),
-                        Float(bitPattern: 1081505568), Float(bitPattern: 1036126208),
-                        Float(bitPattern: 1132067712), Float(bitPattern: 1131661055)],
+        cpuCoreCount: 8,
+        // live_device 默认：8.0→3.5 GiB 递减（landpage 4/4 + 弹幕 87 条实测）。
+        // 旧「float 原始位 hook 值」（≈128.0 等）与任何真实机型不符，弃用。
+        storageRAMGiB: [8.0, 7.5, 6.5, 5.5, 4.5, 3.5],
         androidRelease: p["os_version"] ?? "16",
         brightness: 102,
-        systemVolume: 5,
+        systemVolume: 7,
         usbConnected: -1,
         model: model,
         brand: brand,
-        board: "kona",
-        product: "arm64_mac_qemu",
-        device: "OnePlus8Pro",
-        manufacturer: "OnePlus",
-        hardware: "unknown",
+        board: isKnownAndroid ? model : "kona",
+        product: isKnownAndroid ? model : "arm64_mac_qemu",
+        device: isKnownAndroid ? model : "OnePlus8Pro",
+        manufacturer: manufacturer,
+        hardware: isKnownAndroid ? "qcom" : "unknown",
         featureBits: 21,
         extra7: -888888,
         extra8: -888888,

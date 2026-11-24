@@ -57,7 +57,11 @@ enum HCVendor5 {
     }
 
     static func userAgent(_ device: [String: String], video: Bool) -> String {
-        let version = video ? videoVersionCode : appVersionCode
+        // 版本号跟随签名 device dict 的 version_code（族自动同源：视频族 74332 /
+        // app 族 72232 / landpage 73532）。2026-11-24 突破版实锤：landpage UA=73532、
+        // 弹幕 UA=72232，均与 query 版本族一致；此前硬编码 74332/72232 二选一
+        // 导致 landpage UA 版本错族。
+        let version = headerSafe(device["version_code"], video ? videoVersionCode : appVersionCode)
         let os = headerSafe(device["os_version"], "16")
         let model = headerSafe(device["device_type"], "25053RT47C")
         let build = headerSafe(device["rom_version"], defaultBuild)

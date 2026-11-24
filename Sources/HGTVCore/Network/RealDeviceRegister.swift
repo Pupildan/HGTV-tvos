@@ -42,9 +42,49 @@ public enum RealDeviceRegister {
     // 每个预置身份携带自己的完整三星档案——query/V5 device dict/UA 全套随之切换。
 
     public static let presetIdentities: [Identity] = [
+        // 身份 D（2026-11-24 redroid 原版 app dump 活身份，突破版标准答案）：
+        // Python 完整复刻（test_landpage_v2.py）用它 landpage 4/4 全 200+真数据。
+        // 关键：73532 landpage query 带 klink_egdi 且【不带 openudid/cdid/clientudid/
+        // install_id】（该版本族规范，由 SignInterceptor landpageFamily 白名单保证）；
+        // UA/PB 档案同源 Redmi 23046PNC9C（Build=BP2A.250605.031.A3，不带 F7310 后缀）。
+        // medusa PB 设备档案照 medusa_pb.py live_device 同源（board/product/device=model、
+        // manufacturer=Xiaomi、hardware=qcom）。放在池首，原身份保留在后作降级。
+        // 注：cdid/openudid/clientudid 该身份未知（landpage query 不携带），
+        // 留空由拦截器空值检查跳过。
+        Identity(
+            deviceID: "3638697714281811",
+            installID: "3638697714285907",
+            deviceToken: "AAA3FTMCVH3HDDHTSBEFH75MFSOQSAJT3ERO5TAHKWNUXPLJA5I3RQ6M2OYKGCD6DFR4J7FG2RFCNR73MB5VHQF76VWUWPWFP4MC3SORJIK7XVZZH3X6DM45CP6XW",
+            klinkEgdi: "AAJhLhlbj63fn7hoBhoUQ_X8n3PaWt4m5bXiuWHmtnYY79ADGYbAlfy9",
+            storeRegion: "cn-zj",
+            cdid: "",
+            openudid: "",
+            clientudid: "",
+            apkFirstInstallTime: 0,
+            cookieHeader: "install_id=3638697714285907; store-region=cn-zj; ttreq=1$9b12cff5b7cb78b98ebe95adbbf1560fa77cdf75; store-region-src=did",
+            deviceProfile: [
+                "device_type": "23046PNC9C",
+                "device_brand": "Redmi",
+                "resolution": "1280*2772",
+                "dpi": "520",
+                "rom_version": "BP2A.250605.031.A3",
+                "os_version": "16",
+                "os_api": "36",
+                "host_abi": "arm64-v8a",
+                "dragon_device_type": "phone",
+                "compliance_status": "0",
+                "need_personal_recommend": "1",
+                "player_so_load": "1",
+                "is_android_pad_screen": "0",
+                "channel": "69310258a",
+                "store_region": "cn-zj",
+                "openudid-source": "primary_random",
+                "profile-format": "official-v1",
+            ]
+        ),
         // 身份 C（2026-11-22 手机实测暖身份）：fgtv-v2 响应抓包确认其在 WiFi 下
         // landpage 连续成功（195-351KB/页，注册后 1 秒即成功），且 PC(OpenSSL/HTTP1.1)
-        // 原样重放也成功（377KB）——目前已知最可信身份。放在池首。
+        // 原样重放也成功（377KB）。降级备选；弹幕（appFamily 72232 族）固定用本身份。
         Identity(
             deviceID: "3093339275809908",
             installID: "3093339275814004",
