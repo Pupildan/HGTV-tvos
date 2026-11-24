@@ -162,7 +162,7 @@ public final class SignInterceptor: @unchecked Sendable {
             // install_id/rom/carrier/mcc_mnc 等档案键全部不进 query（服务端
             // 对 73532 族的多余键敏感，多带即静默 0B）。store_region 走头不走 query。
             for (k, v) in credentials.device where !v.isEmpty && k != "store_region" { merged[k] = v }
-            let allow = Set(landpageQueryOrder)
+            let allow = Set(Self.landpageQueryOrder)
             merged = merged.filter { allow.contains($0.key) }
             merged.removeValue(forKey: "install_id")
         } else if appFamily {
