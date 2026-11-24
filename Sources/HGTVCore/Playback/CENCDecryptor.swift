@@ -239,6 +239,12 @@ public enum CENCDecryptor {
     /// 返回解密后的 mp4 data。对每个 trak 的每个样本用其 IV 做 AES-CTR 整样本解密。
     /// 解密后额外做 AVPlayer 兼容清理（见 sanitizeForAVPlayer）。
     /// v21：整个视频共用一个内容密钥 → key schedule 在此展开一次传入 ctrCrypt。
+    ///
+    /// 对齐 nas-bridge/cenc_decrypt.py v90 实战版（逐行核过）：senc 每样本 8 字节 IV
+    ///（flags&0x2 可变长 / flags&0x1 subsample 跳过）直接读表、无需自行递增；
+    /// CTR 16B 计数器块 = IV(8) + 64bit big-endian 从 0 起（Python
+    /// `Counter.new(64, prefix=iv, initial_value=0)` 等价）；逐块 +1 仅在低 8 字节内进位；
+    /// 整样本 XOR keystream。stsz/stsc/stco(co64) 样本定位含 chunk 内累加，逐行一致。
     public static func decrypt(data: Data, key: Data) throws -> Data {
         var buf = [UInt8](data)
         guard let moov = findBox(buf, "moov") else { throw CENCError.noMoov }
@@ -277,10 +283,12 @@ public enum CENCDecryptor {
     ///   - 桌面播放器（VLC/ffplay）对"样本已是明文"宽容，所以 Python 金标准产物能播，
     ///     这个坑只在 AVPlayer 上暴露。
     ///
-    /// 清理方式（原 **in-place 4CC 替换**，不移动任何字节，stco/co64 绝对偏移无需修正）：
+    /// 清理方式（**in-place 4CC 替换**，不移动任何字节，stco/co64 绝对偏移无需修正）：
     ///   - `encv`/`enca` → `frma` 里的原始编码 4CC（hvc1/avc1/mp4a…）
     ///   - `sinf`（含 schm/schi/tenc）→ `free`
-    ///   - `senc`/`saiz`/`saio` → `free`
+    ///   - `senc`/`saiz`/`saio` → `free`（对照 nas-bridge/cenc_sanitize.py v90 实战版：
+    ///     其保留这三个 box 原样也实测播通——AVPlayer 的加密判定只看 stsd sample entry；
+    ///     换成 free 属无害的额外保险，维持 v83 真机已验证的路径）
     static func sanitizeForAVPlayer(_ buf: inout [UInt8]) {
         guard let moov = findBox(buf, "moov") else { return }
         let (moovOff, moovSize) = moov
@@ -309,7 +317,16 @@ public enum CENCDecryptor {
     }
 
     /// 清理 stsd：加密样本入口 encv/enca → frma 原格式；其内部 sinf → free。
-    /// 子 box 起点按 ISO-BMFF：VisualSampleEntry 固定头 86 字节、AudioSampleEntry 36 字节。
+    ///
+    /// 对齐 nas-bridge/cenc_sanitize.py v90 实战版：sinf 定位**不用固定偏移 walk**
+    ///（encv/enca 的 child boxes 前有非 box 固定字段，enca version≠0 时长度还会变），
+    /// 改为在 entry payload 里逐字节扫描 "sinf" fourcc + 结构自洽校验
+    ///（size>=8、off+size<=end、sinf 内第一个子 box 必须是 frma(size=12)），
+    /// 扫描未命中时退回旧固定偏移路径（Visual 86 / Audio 36，v83 真机验证过）兜底。
+    ///
+    /// box 处理保留 in-place 4CC 替换（sinf→free 而非整段切除）：AVPlayer 按规范跳过
+    /// free box，与切除语义等价，且免去 Python 版所需的 stco/co64 chunk 偏移重定位；
+    /// v83 真机已验证可播。
     private static func sanitizeStsd(_ buf: inout [UInt8], _ stsd: Box) {
         let bodyStart = stsd.offset + stsd.headerSize
         let bodyEnd = stsd.offset + stsd.size
@@ -321,24 +338,41 @@ public enum CENCDecryptor {
             guard entrySize >= 8, pos + entrySize <= bodyEnd else { return }
             let type4 = String(decoding: buf[(pos + 4)..<(pos + 8)], as: Unicode.ASCII.self)
             if type4 == "encv" || type4 == "enca" {
-                let childStart = (type4 == "encv") ? pos + 86 : pos + 36
-                let childEnd = pos + entrySize
+                let entryBody = pos + 8
+                let entryEnd = pos + entrySize
                 var originalFormat: [UInt8]?
-                if childStart <= childEnd {
-                    for child in iterBoxes(buf, childStart, childEnd) {
-                        if child.type == "frma" {
-                            let fr = child.offset + child.headerSize
-                            guard fr + 4 <= buf.count else { continue }
-                            originalFormat = Array(buf[fr..<(fr + 4)])
-                        } else if child.type == "sinf" {
-                            swapBoxType(&buf, at: child.offset, to: "free")
-                            // frma 是 sinf 的第一个子 box（original format = 真实编码 4CC）
-                            let sinfBody = child.offset + child.headerSize
-                            let sinfEnd = child.offset + child.size
-                            for sub in iterBoxes(buf, sinfBody, sinfEnd) where sub.type == "frma" {
-                                let fr = sub.offset + sub.headerSize
+                // 主路径（对齐 cenc_sanitize.py _find_sinf）：payload 全范围扫描 sinf
+                if let sinf = findSinf(buf, entryBody, entryEnd) {
+                    // frma 是 sinf 第一个子 box（实战观察），data_format 在其 payload 前 4 字节
+                    let sinfBody = sinf.offset + sinf.headerSize
+                    let sinfEnd = sinf.offset + sinf.size
+                    for sub in iterBoxes(buf, sinfBody, sinfEnd) where sub.type == "frma" {
+                        let fr = sub.offset + sub.headerSize
+                        guard fr + 4 <= buf.count else { continue }
+                        originalFormat = Array(buf[fr..<(fr + 4)])
+                    }
+                    // sinf（含 schm/schi/tenc）→ free（in-place，大小/位置不变）
+                    swapBoxType(&buf, at: sinf.offset, to: "free")
+                }
+                if originalFormat == nil {
+                    // 兜底路径（旧实现，v83 真机验证过）：固定偏移 walk child boxes
+                    let childStart = (type4 == "encv") ? pos + 86 : pos + 36
+                    if childStart <= entryEnd {
+                        for child in iterBoxes(buf, childStart, entryEnd) {
+                            if child.type == "frma" {
+                                let fr = child.offset + child.headerSize
                                 guard fr + 4 <= buf.count else { continue }
                                 originalFormat = Array(buf[fr..<(fr + 4)])
+                            } else if child.type == "sinf" {
+                                // 自洽校验未命中但 4CC 存在的 sinf 也一并换成 free
+                                swapBoxType(&buf, at: child.offset, to: "free")
+                                let sinfBody = child.offset + child.headerSize
+                                let sinfEnd = child.offset + child.size
+                                for sub in iterBoxes(buf, sinfBody, sinfEnd) where sub.type == "frma" {
+                                    let fr = sub.offset + sub.headerSize
+                                    guard fr + 4 <= buf.count else { continue }
+                                    originalFormat = Array(buf[fr..<(fr + 4)])
+                                }
                             }
                         }
                     }
@@ -350,6 +384,32 @@ public enum CENCDecryptor {
             }
             pos += entrySize
         }
+    }
+
+    /// 对齐 nas-bridge/cenc_sanitize.py v90 实战版 `_find_sinf`：
+    /// 在 [start,end) 里逐字节定位一个结构自洽的 sinf box，返回 (offset, size) 或 nil。
+    /// 校验：size>=8、off+size<=end，且 sinf 内第一个子 box 必须是 frma（size==12）。
+    /// 这样能避免误匹配到 hvcC 等负载里偶然出现的 'sinf' 字符串。
+    static func findSinf(_ buf: [UInt8], _ start: Int, _ end: Int) -> (offset: Int, size: Int)? {
+        var o = start
+        while o + 8 <= end {
+            if buf[o + 4] == 0x73, buf[o + 5] == 0x69,
+               buf[o + 6] == 0x6E, buf[o + 7] == 0x66 {   // "sinf"
+                let size = Int(be32(buf, o))
+                if size >= 8, o + size <= end, o + 16 <= end {
+                    // sinf payload 第一个子 box 应为 frma：4CC 在 +12..+16，size 在 +8..+12
+                    if buf[o + 12] == 0x66, buf[o + 13] == 0x72,
+                       buf[o + 14] == 0x6D, buf[o + 15] == 0x61 {   // "frma"
+                        let fsize = Int(be32(buf, o + 8))
+                        if fsize == 12 {
+                            return (o, size)
+                        }
+                    }
+                }
+            }
+            o += 1
+        }
+        return nil
     }
 
     // MARK: - AES-128-CTR（纯 Swift 手写 AES-128-ECB 生成 keystream）

@@ -159,25 +159,9 @@ public final class HTTPClient: Sendable {
         Self.logRequest(method: method, url: urlStr, signed: isSigned, headers: headers,
                         bodyLength: signedReq.body?.count)
 
-        // —— PC TLS 桥（v69）：landpage 等个性化接口按客户端 TLS 指纹门控——
-        //    ATV URLSession 指纹恒被拒（0B），PC OpenSSL 已被重放实验证明可过。
-        //    签名仍在本地完成，PC 只做传输；PC 端还会把请求头排成规范顺序。
-        if PCBridge.isEnabled && target.signed {
-            do {
-                let resp = try await PCBridge.execute(method: method, url: urlStr,
-                                                      headers: headers, body: signedReq.body)
-                Self.logResponse(url: urlStr, status: resp.status, data: resp.data)
-                guard (200..<300).contains(resp.status) else {
-                    DiagnosticsLogger.warn("PC桥 HTTP \(resp.status)：\(urlStr)", category: "http")
-                    throw HTTPError.catalogHTTP(resp.status)
-                }
-                return resp.data
-            } catch {
-                DiagnosticsLogger.error("PC桥请求失败：\(error.localizedDescription)", category: "http",
-                                        meta: ["method": method, "url": urlStr])
-                throw error
-            }
-        }
+        // 签名请求一律本地直连 URLSession（v91：原生自签版彻底移除 PC/NAS 桥兜底，
+        // 签名已升级突破版参数（3f9d363），landpage/弹幕/播放三接口均验证可通；
+        // 失败就抛真实错误，不再有任何桥路径）。
 
         let data: Data
         let resp: URLResponse

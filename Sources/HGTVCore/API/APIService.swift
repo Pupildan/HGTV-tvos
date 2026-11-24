@@ -125,10 +125,8 @@ public final class APIService: Sendable {
     /// 主机层级（1.3.8.6 反编译实锤）：landpage 走 sinfonlineb（q()=T3.j(2,"sinfonlineb")），
     /// api5-normal-lf 层级不服务该接口（实测恒 200+0 字节）。带 a/c/lf 故障转移。
     public func fetchLandpage(offset: Int, sessionId: String) async throws -> LandpagePage {
-        // v85：改为「自签优先，桥兜底」。此前桥优先会掩盖自签的真实结果，
-        // 导致身份统一后的修复无法验证。现在先让 ATV 用自己的签名直连，
-        // 只有直连全 host 失败（0 字节/异常）时才回退到 PC 桥。
-        let bridgeFallback = PCBridge.isEnabled && offset == 0 && sessionId.isEmpty
+        // v91：原生自签版彻底移除桥兜底——自签（突破版参数，commit 3f9d363）失败就抛真实错误，
+        // 不再回退任何 PC/NAS 桥路径，让上层看到真实信号。
         let isFirst = offset == 0 && sessionId.isEmpty
         let payload: [String: Any] = [
             "filter_ids": "",
@@ -179,20 +177,7 @@ public final class APIService: Sendable {
                 lastError = error
             }
         }
-        // v85：自签全 host 失败（0 字节/异常）→ 回退 PC 桥兜底，保证首页仍可出内容。
-        if bridgeFallback {
-            do {
-                let raw = try await PCBridge.fetchFeed()
-                if raw.count > 0 {
-                    let page = try Self.parseLandpage(from: raw, requestOffset: 0, requestSessionId: "")
-                    DiagnosticsLogger.log("PC桥兜底 feed 成功 \(page.items.count) 条 bytes=\(raw.count)",
-                                          category: "playback", level: .info)
-                    return page
-                }
-            } catch {
-                DiagnosticsLogger.warn("PC桥兜底失败：\(error.localizedDescription)", category: "playback")
-            }
-        }
+        // 全 host 失败（0 字节/异常）：抛真实错误（无桥兜底）
         throw lastError
     }
 

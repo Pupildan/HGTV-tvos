@@ -1,4 +1,15 @@
 // PCBridgeClient.swift
+// 【DEPRECATED · v91】PC/NAS TLS 桥已彻底废弃（2026-11-24）。
+//
+// 原生自签版（native-sign）签名升级为突破版参数（commit 3f9d363）后，
+// landpage/弹幕/播放三接口签名全部实测可通，桥功能/兜底已全部移除：
+//   - HTTPClient.swift  全局 PC 桥拦截 → 已删（签名请求一律本地直连）
+//   - APIService.fetchLandpage 的 bridgeFallback 兜底 → 已删
+//   - PlaybackEngine.load/doResolve 的桥优先分支 → 已删
+//   - DanmakuService.fetchAll 的 NAS 桥数据源 → 已删
+// 本文件暂保留（无任何调用点，自包含不影响编译）仅作历史参考，禁止新增引用。
+//
+// —— 以下为原桥实现说明（历史）——
 // PC TLS 桥（2026-11-22）。
 //
 // 决定性实验结论：landpage 等个性化接口按客户端 TLS 指纹门控——
@@ -15,11 +26,11 @@
 
 import Foundation
 
+@available(*, deprecated, message: "原生自签版已彻底移除桥功能（v91），禁止新增引用")
 public enum PCBridge {
-    /// 总开关：2026-11-23 起启用。SM3 FF 在 v83 修复后服务端仍 200+0B，
-    /// 静态复刻路到头；改走 NAS 桥——NAS 用手机真机合法签名重放官方接口
-    /// （已实测 377KB 稳定出数据）。ATV 只做 UI + 播放，签名/取数交给 NAS。
-    public static let isEnabled = true
+    /// 总开关：v91 起恒 false（桥已废弃，双保险——即使有漏网引用也不会再走桥）。
+    @available(*, deprecated, message: "桥已废弃，恒 false")
+    public static let isEnabled = false
     /// NAS 地址（常驻；飞牛 NAS 固定 IP）。
     public static let host = "192.168.10.120"
     public static let port: UInt16 = 51901
