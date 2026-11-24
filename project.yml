@@ -48,14 +48,14 @@ targets:
     info:
       path: tvOS/Info.plist
       properties:
-        CFBundleDisplayName: NbeeSt
+        CFBundleDisplayName: Nbeedp
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvos
+        PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvosdp
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: tvOS/Info.plist
         PRODUCT_NAME: HGTV
