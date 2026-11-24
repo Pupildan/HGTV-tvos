@@ -50,19 +50,49 @@ public final class SignInterceptor: @unchecked Sendable {
 
     /// X-SS-DP 固定 aid
     public static let xSSDP = "8662"
-    /// landpage query 规范参数顺序（2026-11-22 手机成功抓包实锤，41 键固定序；
-    /// ts/_rticket 由签名器追加，恰好也在序列末尾）。
+    /// landpage query 白名单（2026-11-24 突破版标准答案 = test_landpage_v2.py QUERY_VALUES，
+    /// 29 键固定序；ts/_rticket 由签名器追加在末尾）。
+    /// 关键：73532 landpage 族 query 【不带】 openudid/cdid/clientudid/install_id/
+    /// rom/rom_version/carrier/mcc_mnc/apk_first_install_time/profile-format/
+    /// openudid-source（此前 41 键序是 2026-11-22 抓包的旧规格，已被 11-24
+    /// landpage 4/4 实测推翻）。
     static let landpageQueryOrder: [String] = [
-        "iid", "device_id", "ac", "channel", "aid", "app_name", "version_code",
-        "version_name", "device_platform", "os", "ssmix", "device_type", "device_brand",
-        "language", "os_api", "os_version", "manifest_version_code", "resolution", "dpi",
-        "update_version_code", "host_abi", "dragon_device_type", "pv_player",
+        "ac", "channel", "aid", "app_name", "version_code", "version_name",
+        "device_platform", "os", "ssmix", "device_type", "device_brand",
+        "language", "os_api", "os_version", "manifest_version_code", "resolution",
+        "dpi", "update_version_code", "host_abi", "dragon_device_type", "pv_player",
         "compliance_status", "need_personal_recommend", "player_so_load",
-        "is_android_pad_screen", "openudid-source", "mcc_mnc", "openudid",
-        "profile-format", "clientudid", "rom", "cdid", "carrier",
-        "apk_first_install_time", "rom_version", "device_token", "klink_egdi",
+        "is_android_pad_screen", "device_id", "iid", "device_token", "klink_egdi",
         "ts", "_rticket",
     ]
+    /// 弹幕/搜索族（72232）固定身份档案：真机 samsung 72232 活身份
+    /// （test_danmu_v3.py 87 条实测标准答案，与身份 C 同一组）。
+    /// 版本族 72232 与 klink_egdi/openudid/cdid/clientudid 绑定该身份，
+    /// 与 landpage 族（73532/redroid Redmi）不能混用——弹幕请求无论当前
+    /// credentials 是哪个身份，身份键一律强制用这一套。
+    static let danmakuIdentity: [String: String] = [
+        "device_id": "3093339275809908",
+        "iid": "3093339275814004",
+        "device_token": "AAAYR3N2COO6LZJBHO2XYPIAF6M3NSS5J6V7OSEOFUFSMFVJFWBQGUSVJZFM5PGGMP3AEEGH563FYN4VKTTLY5WAHOLP7UAEED32EHYEUP66MQOJY3RKP55U4NLL2",
+        "klink_egdi": "AAKvKdL8rPboP7iOYP2Jh7Lx1-B_-p1lAqjFISZj_7vYL1nm2Kn8Rxo8",
+        "openudid": "ac052ea31ff8401cba75",
+        "openudid-source": "primary_random",
+        "clientudid": "bd7c0136-435c-471c-86f8-106b851aa357",
+        "cdid": "83bb8199-3cec-48ee-8e35-5c32232928c2",
+        "rom": "F7310ZCS9GZF1",
+        "rom_version": "BP4A.251205.006.F7310ZCS9GZF1",
+        "device_type": "SM-F7310",
+        "device_brand": "samsung",
+        "resolution": "1226*1080",
+        "dpi": "360",
+        "carrier": "中国电信",
+        "mcc_mnc": "46011",
+        "apk_first_install_time": "1795345419167",
+        "profile-format": "official-v1",
+    ]
+    /// 弹幕族 Cookie（test_danmu_v3.py COOKIE 实锤：install_id/store-region/
+    /// store-region-src，无 ttreq）。
+    static let danmakuCookie = "install_id=3093339275814004; store-region=cn-zj; store-region-src=did"
     /// passport-sdk-version（登录后）/ 6031190（未登录）
     public static let passportSDKVersion = "5051452"
     public static let anonymousPassportSDKVersion = "6031190"
@@ -126,12 +156,23 @@ public final class SignInterceptor: @unchecked Sendable {
         //    device_id 与身份指纹一致是个性化接口的硬要求。
         if !credentials.token.isEmpty { merged["device_token"] = credentials.token }
         if landpageFamily {
-            // landpage：应用全部身份档案键（抓包 #2 实锤 query 携带全套档案，
-            // 含 device_type/brand/resolution/dpi/rom/carrier/mcc_mnc 等；
-            // 预置身份切换时三星档案随身份整体替换）。
-            // store_region 不进 query（hdr_capture 01:07 实锤：原版 landpage query 无
-            // store_region，该值走 Cookie + X-Tt-Store-Region 头）
+            // landpage：先应用全部身份档案键（预置身份切换时档案随身份整体替换），
+            // 再按白名单（landpageQueryOrder = test_landpage_v2.py QUERY_VALUES）裁剪。
+            // 2026-11-24 突破版实锤：query 只留 29 键，openudid/cdid/clientudid/
+            // install_id/rom/carrier/mcc_mnc 等档案键全部不进 query（服务端
+            // 对 73532 族的多余键敏感，多带即静默 0B）。store_region 走头不走 query。
             for (k, v) in credentials.device where !v.isEmpty && k != "store_region" { merged[k] = v }
+            let allow = Set(landpageQueryOrder)
+            merged = merged.filter { allow.contains($0.key) }
+            merged.removeValue(forKey: "install_id")
+        } else if appFamily {
+            // 弹幕/搜索族（72232）：身份键固定用真机 samsung 72232 活身份
+            // （danmakuIdentity，test_danmu_v3.py 87 条实测）。版本族与
+            // klink_egdi/openudid/cdid/clientudid 绑定该身份，即使当前
+            // credentials 已切到 landpage 族身份（Redmi）也不能混用。
+            for (k, v) in Self.danmakuIdentity { merged[k] = v }
+            // test_danmu_v3.py QUERY_VALUES 无 install_id（只有 iid）
+            merged.removeValue(forKey: "install_id")
         } else {
             for key in ["openudid", "cdid", "clientudid", "klink_egdi", "rom", "rom_version",
                         "carrier", "mcc_mnc", "apk_first_install_time", "profile-format",
@@ -166,10 +207,10 @@ public final class SignInterceptor: @unchecked Sendable {
                 deviceOverride = base.merging(credentials.device) { _, new in new }
             }
             v5Lock.lock()
-            // v66：UA 版本恢复与原版一致——landpage 的 UA 恒为默认族 74332（原版 UA 不随
-            // query 的 73532 族变，v62 误改成 72232 与原版 UA 唯一值级偏差）。Cronet 后缀
-            // 由本函数出口（landpageFamily 分支）统一裁掉。
-            // queryOrder：手机成功抓包的规范参数顺序（原版 TTNet 固定序）。
+            // 2026-11-24 突破版：UA 版本号跟随签名 device dict 的 version_code
+            // （landpage=73532 / 弹幕=72232 / 视频族=74332），POST 带完整 Cronet/TTNet
+            // 后缀（与 Python 标准答案 UA 一致，出口不再裁剪）。
+            // queryOrder：突破版 landpage 白名单键序（test_landpage_v2.py QUERY_VALUES）。
             let v5req = v5.sign(baseURL, merged, body: body, method: nil, deviceOverride: deviceOverride,
                                 queryOrder: landpageFamily ? Self.landpageQueryOrder : nil)
             v5Lock.unlock()
@@ -187,8 +228,12 @@ public final class SignInterceptor: @unchecked Sendable {
         var headers = req.headers
         for (k, v) in extraHeaders { headers[k] = v }
 
-        // Cookie：凭证 cookie
-        if credentials.hasCookie {
+        // Cookie：弹幕族固定 samsung 72232 Cookie（无 ttreq，test_danmu_v3.py 实锤）；
+        // 其余请求用凭证 cookie（landpage 突破版 = install_id/store-region/ttreq/
+        // store-region-src 四件套，无 device_token）
+        if appFamily {
+            headers["Cookie"] = Self.danmakuCookie
+        } else if credentials.hasCookie {
             headers["Cookie"] = credentials.cookie
         }
         // X-SS-DP（V5 passport 路径已加，这里统一补齐）
@@ -213,26 +258,23 @@ public final class SignInterceptor: @unchecked Sendable {
             headers["x-tt-trace-id"] = "00-\(uuid)-\(uuid.prefix(16))-01"
         }
 
-        if landpageFamily {
-            // hdr_capture(01:07) 实锤原版 landpage 头集与 v60 的差异，逐项对齐：
+        if landpageFamily || appFamily {
+            // hdr_capture(01:07) + 2026-11-24 突破版（test_landpage_v2/test_danmu_v3）逐项对齐：
             // ① 原版不带 x-tt-token（device_token 只在 query，x-tt-token 是登录会话头）
             // ② 原版不带 X-HGTV-Anonymous / X-HGTV-Identity
             // ③ 原版不带 x-tt-trace-id
-            // ④ 原版带 X-Tt-Store-Region / X-Tt-Store-Region-Src（TTNet 传输层注入）
-            // ⑤ UA 无 Cronet/TTNet 后缀 —— V5/legacy 两条路径统一在此裁剪
-            //   （v62 只给 V5 传了 uaCronet=false，legacy 降级路径漏网，v62 实测踩坑）
+            // ④ 带 X-Tt-Store-Region / X-Tt-Store-Region-Src（TTNet 传输层注入）
+            // ⑤ UA 保留完整形态：2026-11-24 实锤 landpage/弹幕 UA 均带 Cronet/TTNet
+            //    后缀，且版本号与请求族一致（landpage=73532、弹幕=72232）——v66 的
+            //    「裁 Cronet + 版本跟随旧族」已被新抓包推翻，此处不再裁剪。
+            // x-tt-dt 保留：1.3.8.6 jadx J3 头组装实锤真版 app 明确发送 "x-tt-dt": ""
             headers.removeValue(forKey: "x-tt-token")
             headers.removeValue(forKey: Self.hgtvIdentityHeader)
             headers.removeValue(forKey: Self.hgtvAnonymousHeader)
             headers.removeValue(forKey: "x-tt-trace-id")
-            // x-tt-dt 保留：1.3.8.6 jadx J3 头组装实锤真版 app 明确发送 "x-tt-dt": ""
-            // （v66 曾误删——旧 01:07 抓包与新抓包都有此头，只是值为空）
-            if let ua = headers["User-Agent"], let range = ua.range(of: "; Cronet/") {
-                // v81 修复：裁掉 Cronet 后缀后必须补回右括号。
-                // 真机抓包实锤：landpage UA = "…Build/<rom_version>)"（带括号收尾），
-                // 此前裁剪后变成 "…F7310ZCS9GZF1" 缺右括号，UA 与真机格式不一致。
-                headers["User-Agent"] = String(ua[..<range.lowerBound]) + ")"
-            }
+        }
+        // X-Tt-Store-Region(-Src)：landpage 与弹幕族都带（Python 标准答案头集实锤）
+        if landpageFamily || appFamily {
             let sr = credentials.device["store_region"] ?? ""
             if !sr.isEmpty {
                 headers[HGTVConfig.HeaderKey.storeRegion] = sr

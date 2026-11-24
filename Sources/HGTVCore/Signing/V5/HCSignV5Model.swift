@@ -159,7 +159,10 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[2] = Int64(d.collectionState)
     v[3] = i.aid
     v[4] = i.deviceID
-    v[5] = i.deviceTokenShort
+    // 2026-11-24 突破版：field5 = identity.token（完整 token）——Python medusa_pb.py
+    // medusa_device_message v[5]=i.token 同源（landpage 4/4 + 弹幕 87 条实测标准答案）。
+    // 此前的 I1.c 派生短 token 从未通过端到端验证。
+    v[5] = i.token
     v[6] = d.cache256
     v[7] = d.extra7
     v[8] = d.extra8
@@ -173,11 +176,12 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[22] = d.androidRelease
     v[23] = Int64(d.brightness)
     v[24] = Int64(d.systemVolume)
-    // v80：record 时间戳偏移按真机 hook 精确值（dev40 = record0-180663 精确常量）。
-    // 真机：dev25≈-6936.6s、dev26≈-180.3s（SDK 启动）、dev27≈-6117.4s、dev40=-180663ms。
-    v[25] = record0 - 6936623
-    v[26] = record0 - 180290
-    v[27] = record0 - 6117375
+    // 2026-11-24 突破版：时间戳偏移照 Python medusa_pb.py（-400/-41/-1000/-321，
+    // 与 1.3.7 Kotlin 源一致，40 组对拍 + 实战通过）。v80 的 hook 推算偏移
+    // （-6936623/-180290/-6117375/-180663）从未端到端验证，弃用。
+    v[25] = record0 - 400
+    v[26] = record0 - 41
+    v[27] = record0 - 1000
     v[28] = nowMS
     v[29] = Int64(d.usbConnected)
     v[30] = d.model
@@ -188,7 +192,7 @@ func hcMedusaDeviceMessage(_ d: HCMedusaDevice, _ i: HCMedusaIdentity, nowMS: In
     v[35] = d.manufacturer
     v[36] = d.hardware
     v[38] = d.featureBits
-    v[40] = record0 - 180663
+    v[40] = record0 - 321
     for n in 0..<6 { v[Int32(16 + n)] = d.storageRAMGiB[n] }
     return v
 }
@@ -207,7 +211,10 @@ func hcMedusaContext(_ i: HCMedusaIdentity, _ d: HCMedusaDevice, _ s: HCMedusaSd
     v[7] = Int64(s.processID)
     v[8] = i.channel
     v[13] = [
-        Int32(1): Int64((o.timeMS - 180663) / 1000 + 3),
+        // 2026-11-24 突破版：13.1 = process.record0 / 1000（当前秒）——Python
+        // medusa_pb.py medusa_context v[13]={1: record0//1000, 2: 3, 4: 200} 同源。
+        // 此前 (timeMS-180663)/1000+3 的 hook 推算值从未端到端验证。
+        Int32(1): Int64(t.process.record0 / 1000),
         Int32(2): Int64(3),
         Int32(4): Int64(200),
     ] as [Int32: Any]

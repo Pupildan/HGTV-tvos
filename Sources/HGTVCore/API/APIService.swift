@@ -552,7 +552,9 @@ public final class APIService: Sendable {
         let body = try JSONSerialization.data(withJSONObject: payload, options: [])
 
         let target = HTTPTargetImpl(
-            host: HGTVConfig.Host.sinfonlinea,   // 原版弹幕层级（真机抓包+反编译 T3.j(2,"sinfonlinea")）
+            // 2026-11-24 突破版：弹幕实测成功 host = sinfonlineb（test_danmu_v3.py
+            // v2.HOST 改写 + 87 条真数据）。反编译的 sinfonlinea 保留作备选层级记录。
+            host: HGTVConfig.Host.sinfonlineb,
             path: "/novel/commentapi/comment/list/\(vid)/v1/",
             method: "POST",
             query: [:],
@@ -560,11 +562,12 @@ public final class APIService: Sendable {
             signed: true,
             // 弹幕/搜索走 app 版本族（72232 / 7.2.2.32）
             appFamily: true,
-            // 原项目 l0.A 原文：commentapi POST 显式置空 x-ss-stub，并带 comment-source/server-channel 头
+            // comment-source/server-channel 照原 app 头集；x-ss-stub 不再显式置空——
+            // V5 签名器按 body MD5 大写填充（test_danmu_v3.py 87 条实测标准答案），
+            // 旧「置空」与实测成功请求不符
             extraHeaders: [
                 "comment-source": "601",
                 "server-channel": "1000",
-                "x-ss-stub": "",
             ]
         )
         let raw = try await http.request(target)
