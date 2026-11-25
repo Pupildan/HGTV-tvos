@@ -118,18 +118,19 @@ enum CurlImpersonateTransport {
             }
         }
 
-        // ⑥ 响应体收集（write callback；首参 char*，与 curl.h 的 curl_write_callback 一致）
+        // ⑥ 响应体收集（write callback——签名必须与 curl_write_callback 完全一致：
+        //    tvOS SDK 导入的 size/nmemb/返回值都是 Int 而非 UInt，不一致即编译错误）
         let buffer = ResponseBuffer()
-        let writeFn: @convention(c) (UnsafeMutablePointer<CChar>?, UInt, UInt, UnsafeMutableRawPointer?) -> UInt = {
+        let writeFn: @convention(c) (UnsafeMutablePointer<CChar>?, Int, Int, UnsafeMutableRawPointer?) -> Int = {
             ptr, size, nmemb, ctx in
             guard let ptr, let ctx else { return 0 }
             let buf = Unmanaged<ResponseBuffer>.fromOpaque(ctx).takeUnretainedValue()
-            let total = Int(size) * Int(nmemb)
+            let total = size * nmemb
             if total > 0 {
                 let bytes = UnsafeRawPointer(ptr).assumingMemoryBound(to: UInt8.self)
                 buf.data.append(bytes, count: total)
             }
-            return UInt(total)
+            return total
         }
         curl_shim_set_writefunction(handle, writeFn)
         curl_shim_set_writedata(handle, Unmanaged<ResponseBuffer>.passUnretained(buffer).toOpaque())
