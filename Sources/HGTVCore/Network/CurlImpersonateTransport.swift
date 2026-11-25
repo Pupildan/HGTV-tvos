@@ -84,20 +84,21 @@ enum CurlImpersonateTransport {
         var code = curl_easy_impersonate(handle, impersonateTarget, 0)
         guard code == CURLE_OK else { throw curlError(code, url: url, what: "impersonate") }
 
-        // ② 基本设置（语义与 NIO 通道对齐）——全部走 curl_shim.h 类型安全包装
-        //    （curl_easy_setopt 是 varargs，Swift importer 标记 unavailable 无法直调）
-        code = curl_shim_setopt_cstr(handle, CURLOPT_URL, url)
+        // ② 基本设置（语义与 NIO 通道对齐）——全部走 curl_shim.h 专用包装函数
+        //    （curl_easy_setopt 是 varargs + CURLOPT_* 是 C 宏，Swift importer
+        //     均不可见，必须经 C inline 函数中转）
+        code = curl_shim_set_url(handle, url)
         guard code == CURLE_OK else { throw curlError(code, url: url, what: "setopt URL") }
-        curl_shim_setopt_long(handle, CURLOPT_FOLLOWLOCATION, 1)       // 与 NIO redirect follow 一致
-        curl_shim_setopt_long(handle, CURLOPT_CONNECTTIMEOUT, 10)
-        curl_shim_setopt_long(handle, CURLOPT_TIMEOUT, 30)
+        curl_shim_set_followlocation(handle, 1)       // 与 NIO redirect follow 一致
+        curl_shim_set_connecttimeout(handle, 10)
+        curl_shim_set_timeout(handle, 30)
         // 证书校验：库编译时 USE_APPLE_SECTRUST=ON → SecTrust（tvOS 系统信任库）；
         // CURLOPT_SSL_VERIFYPEER 保持默认 1，不关校验。tvOS 无文件系统 CA bundle，
         // 库已不依赖 CURL_CA_BUNDLE 文件。
 
         // ③ 响应 gzip/deflate/br/zstd 自动解压（上层拿明文，与 URLSession 行为一致；
         //    Accept-Encoding 头由 libcurl 按本串原样发出，与 chrome 顺序一致）
-        code = curl_shim_setopt_cstr(handle, CURLOPT_ACCEPT_ENCODING, "gzip, deflate, br, zstd")
+        code = curl_shim_set_accept_encoding(handle, "gzip, deflate, br, zstd")
         guard code == CURLE_OK else { throw curlError(code, url: url, what: "setopt encoding") }
 
         // ④ 字节系签名头（顺序 = SignInterceptor 产出序）
@@ -106,14 +107,14 @@ enum CurlImpersonateTransport {
             slist = curl_slist_append(slist, "\(k): \(v)")
         }
         defer { curl_slist_free_all(slist) }
-        curl_shim_setopt_ptr(handle, CURLOPT_HTTPHEADER, slist)
+        curl_shim_set_httpheader(handle, slist)
 
         // ⑤ body（POST：gzip 字节含 0x00——withUnsafeBytes 闭包内 setopt 让 curl 立即拷贝）
         if method.uppercased() == "POST", let body, !body.isEmpty {
-            curl_shim_setopt_long(handle, CURLOPT_POSTFIELDSIZE, body.count)
+            curl_shim_set_postfieldsize(handle, body.count)
             body.withUnsafeBytes { raw in
                 guard let base = raw.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
-                _ = curl_shim_setopt_cstr(handle, CURLOPT_COPYPOSTFIELDS, base)
+                _ = curl_shim_set_copypostfields(handle, base)
             }
         }
 
@@ -130,10 +131,8 @@ enum CurlImpersonateTransport {
             }
             return UInt(total)
         }
-        curl_shim_setopt_ptr(handle, CURLOPT_WRITEFUNCTION,
-                             unsafeBitCast(writeFn, to: UnsafeMutableRawPointer.self))
-        curl_shim_setopt_ptr(handle, CURLOPT_WRITEDATA,
-                             Unmanaged<ResponseBuffer>.passUnretained(buffer).toOpaque())
+        curl_shim_set_writefunction(handle, writeFn)
+        curl_shim_set_writedata(handle, Unmanaged<ResponseBuffer>.passUnretained(buffer).toOpaque())
 
         // ⑦ 执行
         code = curl_easy_perform(handle)
