@@ -57,23 +57,56 @@ cmake -S . -B build \
 echo "==> build (BoringSSL + 8 deps + curl, 15-25 min on runner)"
 cmake --build build --parallel "$(sysctl -n hw.ncpu)"
 
-echo "==> install"
-cmake --install build
+echo "==> install（tvOS 下 curl 可执行被打成 .app bundle，install 路径会找不到——容错）"
+cmake --install build 2>&1 | tail -5 || true
 
-echo "==> installed layout:"
-find "${PREFIX}" -maxdepth 2 | head -40
+echo "==> 手动收集构建树产物（install 兜底）"
+mkdir -p "${PREFIX}/lib" "${PREFIX}/include"
+echo "--- 构建树中的全部静态库 ---"
+find "$WORKDIR/curl-imp/build" -name "*.a" -type f
+
+# libcurl（impersonate patch 版静态库）+ BoringSSL + 全部依赖
+CURL_A=$(find "$WORKDIR/curl-imp/build" -name "libcurl.a" | head -1)
+SSL_A=$(find "$WORKDIR/curl-imp/build" -name "libssl.a" | head -1)
+CRYPTO_A=$(find "$WORKDIR/curl-imp/build" -name "libcrypto.a" | head -1)
+IMP_A=$(find "$WORKDIR/curl-imp/build" -name "libcurl-impersonate*.a" | head -1)
+[ -n "$CURL_A" ] && cp "$CURL_A" "${PREFIX}/lib/"
+[ -n "$SSL_A" ] && cp "$SSL_A" "${PREFIX}/lib/"
+[ -n "$CRYPTO_A" ] && cp "$CRYPTO_A" "${PREFIX}/lib/"
+[ -n "$IMP_A" ] && cp "$IMP_A" "${PREFIX}/lib/"
+# 其余依赖（nghttp2/ngtcp2/nghttp3/cares/z/zstd/brotli…）
+find "$WORKDIR/curl-imp/build" -name "libnghttp*.a" -o -name "libngtcp2*.a" -o \
+     -name "libnghttp3*.a" -o -name "libcares*.a" -o -name "libz.a" -o \
+     -name "libzstd*.a" -o -name "libbrotli*.a" 2>/dev/null | \
+  while read -r f; do cp "$f" "${PREFIX}/lib/"; done
+echo "--- ${PREFIX}/lib 下的库 ---"
+ls "${PREFIX}/lib/"
+
+# 头文件：curl（构建生成 + 源码）
+CURL_INC_DIR=$(find "$WORKDIR/curl-imp/build" -name "curl.h" -not -path "*openssl*" | head -1)
+[ -n "$CURL_INC_DIR" ] && cp "$(dirname "$CURL_INC_DIR")"/curl*.h "${PREFIX}/include/" 2>/dev/null
+SRC_CURL_INC=$(find "$WORKDIR/curl-imp" -path "*include/curl/curl.h" -not -path "*/build/*" | head -1)
+[ -n "$SRC_CURL_INC" ] && cp "$(dirname "$SRC_CURL_INC")"/curl*.h "${PREFIX}/include/" 2>/dev/null
+# 头文件：BoringSSL（openssl/*）
+SSL_H=$(find "$WORKDIR/curl-imp/build" -name "ssl.h" -path "*openssl*" | head -1)
+if [ -n "$SSL_H" ]; then
+  mkdir -p "${PREFIX}/include/openssl"
+  cp "$(dirname "$SSL_H")"/*.h "${PREFIX}/include/openssl/" 2>/dev/null
+fi
+echo "--- include 顶层 ---"
+ls "${PREFIX}/include/" | head -10
 
 echo "==> merge static libs into single archive (simplifies Xcode linking)"
-if [ ! -f "${PREFIX}/lib/libcurl-impersonate.a" ]; then
-  echo "ERROR: libcurl-impersonate.a not found after install"
-  exit 1
-fi
-LIBS=("${PREFIX}/lib/libcurl-impersonate.a")
+LIBS=()
 shopt -s nullglob
-for f in "${PREFIX}"/lib/curl-impersonate/*.a; do
+for f in "${PREFIX}"/lib/*.a; do
   LIBS+=("$f")
 done
 shopt -u nullglob
+if [ ${#LIBS[@]} -eq 0 ]; then
+  echo "ERROR: 无静态库可合并"
+  exit 1
+fi
 echo "merge inputs:"
 printf '  %s\n' "${LIBS[@]}"
 xcrun libtool -static -o "${PREFIX}/lib/libcurl-imp-tvos.a" "${LIBS[@]}"
