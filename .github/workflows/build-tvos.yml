@@ -107,10 +107,34 @@ jobs:
           HGTV_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           chmod +x Scripts/build_ipa.sh Scripts/stamp_version.sh
-          set -o pipefail
           ./Scripts/build_ipa.sh 2>&1 | tee build_output.log
-          # 构建后处理：把 v{N} 写进 Info.plist 并重命名为 HGTV-tvOS-v{N}-unsigned.ipa
           ./Scripts/stamp_version.sh 2>&1 | tee -a build_output.log
+
+      - name: Extract xcresult diagnostics (failure — 决定性错误来源)
+        if: failure()
+        run: |
+          echo "=== build_full.log 全部 error 行 ==="
+          ls -la build_full.log 2>/dev/null || echo "(build_full.log 不存在)"
+          grep -E "error:" build_full.log 2>/dev/null | grep -viE "warning" | head -80 || true
+          echo "=== xcresult errorDiagnostics ==="
+          ls -d build.xcresult 2>/dev/null || echo "(build.xcresult 不存在)"
+          if [ -d build.xcresult ]; then
+            xcrun xcresulttool get --legacy --path build.xcresult --format json > xcresult.json 2>/dev/null
+            python3 Scripts/extract_xcresult.py
+          fi
+
+      - name: Upload diagnostics (always — 全量诊断数据)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: |
+            build_full.log
+            build_output.log
+            xcresult.json
+            typecheck.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload build log (always, for debugging)
         if: always()
