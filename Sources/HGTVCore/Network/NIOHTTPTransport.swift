@@ -75,7 +75,7 @@ enum NIOHTTPTransport {
         let resp = try await client.execute(req, timeout: .seconds(30))
         var buf = try await resp.body.collect(upTo: 64 * 1024 * 1024)
         let bytes = buf.readBytes(length: buf.readableBytes) ?? []
-        return (resp.status.code, Data(bytes))
+        return (status: Int(resp.status.code), data: Data(bytes))
     }
 }
 

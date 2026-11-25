@@ -5,14 +5,10 @@ name: Impersonate TLS fingerprint test
 # 验证「字节 CDN 黑名单 Apple TLS 栈 JA3/JA4、OpenSSL/curl 指纹可过」假说。
 # 独立 job：不触碰主构建（build-tvos.yml）的任何步骤。
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'Scripts/sign_cli.swift'
-      - 'Scripts/send_impersonate.py'
-      - '.github/workflows/impersonate-test.yml'
-      - 'Package.swift'
   workflow_dispatch:
+  # 2026-11-24 优化：指纹验证目的已达成（curl_cffi 归一实验实锤 BoringSSL 指纹可过，
+  # Swift 集成走 AsyncHTTPClient），不再随 push 自动跑（Package.swift 频繁变更曾导致
+  # 每次 push 双工作流）。需要复测时在 Actions 页手动 Run workflow。
 
 concurrency:
   group: impersonate-test-${{ github.ref }}
