@@ -40,12 +40,14 @@ rm -rf "${ARCHIVE}"
 # 裸 SwiftPM 可执行包 archive 出来是命令行工具（usr/local/bin），不是 .app。
 # 2>&1 全量落盘（错误诊断关键——tail -60 曾把全部 Swift error 截掉）+ pipefail 保留失败码
 set -o pipefail
+rm -rf "$PWD/build.xcresult"
 xcodebuild archive \
   -project HGTV.xcodeproj \
   -scheme HGTV \
   -configuration "${CONFIG}" \
   -destination 'generic/platform=tvOS' \
   -archivePath "${ARCHIVE}" \
+  -resultBundlePath "$PWD/build.xcresult" \
   -allowProvisioningUpdates \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGN_IDENTITY="" \
@@ -57,6 +59,33 @@ if [ "$BUILD_EXIT" -ne 0 ]; then
   echo "==> ================= 全部编译 error 行（来自 build_full.log）================="
   grep -E "error:" "$PWD/build_full.log" | grep -viE "warning" | head -60
   echo "==> ================= error 行结束 ================="
+  echo "==> ================= xcresult 提取（决定性——xcodebuild 管道模式吞明文 error）================="
+  if [ -d "$PWD/build.xcresult" ]; then
+    xcrun xcresulttool get --legacy --path "$PWD/build.xcresult" --format json > "$PWD/xcresult.json" 2>/dev/null
+    python3 - <<'PY'
+import json
+d = json.load(open('xcresult.json'))
+issues = d.get('issues', {})
+errs = issues.get('errorDiagnostics', [])
+print('xcresult errorDiagnostics 条数:', len(errs))
+for e in errs:
+    fp = e.get('filePath', '') or ''
+    ln = e.get('line', '')
+    msg = (e.get('diagnostic', '') or '')[:400]
+    print(f'  {fp}:{ln} {msg}')
+if not errs:
+    # 兜底：递归找所有含 error 的诊断文本
+    def walk(o, path=''):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                walk(v, f'{path}.{k}')
+        elif isinstance(o, list):
+            for x in o: walk(x, path)
+        elif isinstance(o, str) and 'error:' in o.lower():
+            print('  [walk]', o[:300])
+    walk(d)
+PY
+  echo "==> ================= xcresult 提取结束 ================="
 fi
 
 echo "==> locating archived .app"
