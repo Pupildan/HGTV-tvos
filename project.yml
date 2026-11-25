@@ -47,6 +47,21 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvos.core
         PRODUCT_NAME: HGTVCore
         GENERATE_INFOPLIST_FILE: YES
+        # —— libcurl-impersonate（chrome131_android TLS/H2 指纹）tvOS 静态库集成 ——
+        # Vendor/curl-imp/ 由 CI job build-curl-impersonate 下载解压（本地无此目录，
+        # 编译只能跑 CI，缺失时链接期报错——构建期暴露，不留静默降级）。
+        # Swift 侧经 Vendor/CurlShim 的 modulemap import CurlShim（见 curl_shim.h）。
+        # 合并库 libcurl-imp-tvos.a = libcurl-impersonate + BoringSSL(ssl/crypto) +
+        # nghttp2/ngtcp2/nghttp3/c-ares/zlib/zstd/brotli（lexiforest superbuild 产出）。
+        # SecTrust 验证用 Security.framework；CoreFoundation 是 SecTrust 的底层依赖。
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Vendor/CurlShim $(SRCROOT)/Vendor/curl-imp/include"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/curl-imp/include"
+        OTHER_LDFLAGS:
+          - "$(SRCROOT)/Vendor/curl-imp/lib/libcurl-imp-tvos.a"
+          - "-framework"
+          - "Security"
+          - "-framework"
+          - "CoreFoundation"
   # tvOS app，编译界面层（含 @main），依赖 HGTVCore
   HGTV:
     type: application

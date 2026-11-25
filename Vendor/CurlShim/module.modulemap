@@ -1,0 +1,4 @@
+module CurlShim {
+    header "curl_shim.h"
+    export *
+}

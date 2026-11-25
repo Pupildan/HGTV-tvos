@@ -1,1 +1,8 @@
 __pycache__/
+# CI build-curl-impersonate job 下载解压的产物目录（不入 git，本地不生成）
+Vendor/curl-imp/
+# curl-impersonate 构建临时目录（CI）
+curl-imp-install/
+curl-imp-work/
+curl-impersonate-tvos.tar.gz
+

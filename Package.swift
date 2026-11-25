@@ -56,6 +56,7 @@ let package = Package(
             path: "Scripts",
             exclude: [
                 "build_ipa.sh",
+                "build_curl_impersonate.sh",
                 "log_server.py",
                 "send_impersonate.py",
                 "stamp_version.sh",

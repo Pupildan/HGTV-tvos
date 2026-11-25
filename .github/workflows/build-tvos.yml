@@ -12,8 +12,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # —— libcurl-impersonate tvOS 静态库编译（主构建前置依赖）——
+  # lexiforest/curl-impersonate（curl_cffi 同源实现，活跃维护）CMake superbuild：
+  # 自动下载并构建 BoringSSL + nghttp2/ngtcp2/nghttp3 + brotli/zstd/zlib/c-ares +
+  # curl 8.23（impersonate patch，39 个浏览器预设内建）。tvOS 交叉编译走
+  # CMAKE_SYSTEM_NAME=iOS + appletvos SDK + arm64（cmake 官方 Apple 交叉做法，
+  # lexiforest 顶层 CMakeLists 对 iOS 系统名有专门处理并把工具链参数传播到全部
+  # 子项目）。证书校验走 Apple SecTrust（USE_APPLE_SECTRUST，tvOS 系统信任库），
+  # 无需打包 cacert.pem。产物 tar.gz：include/ 头 + 合并静态库 libcurl-imp-tvos.a。
+  build-curl-impersonate:
+    name: Build libcurl-impersonate (tvOS arm64, chrome131_android)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build tvOS static lib (cross-compile)
+        run: |
+          chmod +x Scripts/build_curl_impersonate.sh
+          ./Scripts/build_curl_impersonate.sh
+
+      - name: Upload curl-impersonate bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: curl-impersonate-tvos
+          path: curl-impersonate-tvos.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build unsigned tvOS ipa
+    needs: build-curl-impersonate
     runs-on: macos-latest   # macOS 26 arm64，带最新 Xcode
     timeout-minutes: 40
     permissions:
@@ -22,6 +52,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fetch + extract curl-impersonate bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: curl-impersonate-tvos
+          path: Vendor/curl-imp
+
+      - name: Verify curl-impersonate bundle
+        run: |
+          tar xzf Vendor/curl-imp/curl-impersonate-tvos.tar.gz -C Vendor/curl-imp
+          echo "=== bundle layout ==="
+          find Vendor/curl-imp -maxdepth 2 | head -40
+          echo "=== merged archive architectures ==="
+          lipo -info Vendor/curl-imp/lib/libcurl-imp-tvos.a
+          echo "=== impersonate symbols (must include curl_easy_impersonate) ==="
+          nm -gU Vendor/curl-imp/lib/libcurl-imp-tvos.a 2>/dev/null \
+            | grep -E '_curl_easy_(init|impersonate|setopt|perform)$' | head -8
+          cat Vendor/curl-imp/share/BUNDLE_INFO.txt
 
       - name: Diagnose environment
         run: |
