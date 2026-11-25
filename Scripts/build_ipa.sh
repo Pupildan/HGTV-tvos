@@ -87,6 +87,7 @@ PY
   echo "==> ================= xcresult 提取结束 ================="
   exit "$BUILD_EXIT"   # 失败路径：诊断完直接退出（无 .app 可打包）
 fi
+fi
 
 echo "==> locating archived .app"
 echo "==> archive structure:"
