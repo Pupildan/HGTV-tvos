@@ -52,6 +52,7 @@ cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
   -DUSE_LIBIDN2=OFF \
+  -DUSE_APPLE_IDN=ON \
   -DCURL_CA_BUNDLE=none
 
 echo "==> build (BoringSSL + 8 deps + curl, 15-25 min on runner)"
