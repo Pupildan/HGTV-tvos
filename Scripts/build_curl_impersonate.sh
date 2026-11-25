@@ -101,6 +101,36 @@ fi
 echo "--- include 顶层 ---"
 ls "${PREFIX}/include/" | head -10
 
+# —— 链接符号 stub：libidn v1（uidna_*）与 iconv 在 tvOS 上不存在。
+# 字节系 API 的域名全为 ASCII，curl 的 IDN 路径不会触发；stub 返回失败即可。
+echo "==> 生成链接符号 stub（uidna_*/iconv）"
+STUBS_C="$WORKDIR/curl-imp/build/curl_shim_stubs.c"
+cat > "$STUBS_C" <<'CEOF'
+#include <stddef.h>
+void *uidna_openUTS46(int flags) { (void)flags; return (void *)0; }
+int uidna_nameToASCII_UTF8(void *ctx, const char *u, char *a) {
+    (void)ctx; (void)u; (void)a; return -1;
+}
+int uidna_nameToUnicodeUTF8(void *ctx, const char *a, char *u) {
+    (void)ctx; (void)a; (void)u; return -1;
+}
+void uidna_close(void *ctx) { (void)ctx; }
+size_t iconv(void *cd, char **inbuf, size_t *inbytesleft,
+             char **outbuf, size_t *outbytesleft) {
+    (void)cd; (void)inbuf; (void)inbytesleft;
+    (void)outbuf; (void)outbytesleft;
+    return (size_t)-1;
+}
+void *iconv_open(const char *tocode, const char *fromcode) {
+    (void)tocode; (void)fromcode; return (void *)0;
+}
+int iconv_close(void *cd) { (void)cd; return 0; }
+CEOF
+SDK_PATH=$(xcrun --sdk appletvos --show-sdk-path)
+xcrun clang -target arm64-apple-tvos13.0 -isysroot "$SDK_PATH" \
+  -c "$STUBS_C" -o "$WORKDIR/curl-imp/build/curl_shim_stubs.o"
+echo "stub 编译完成"
+
 echo "==> merge static libs into single archive (simplifies Xcode linking)"
 LIBS=()
 shopt -s nullglob
@@ -114,7 +144,7 @@ if [ ${#LIBS[@]} -eq 0 ]; then
 fi
 echo "merge inputs:"
 printf '  %s\n' "${LIBS[@]}"
-xcrun libtool -static -o "${PREFIX}/lib/libcurl-imp-tvos.a" "${LIBS[@]}"
+xcrun libtool -static -o "${PREFIX}/lib/libcurl-imp-tvos.a" "${LIBS[@]}" "$WORKDIR/curl-imp/build/curl_shim_stubs.o"
 
 echo "==> verify"
 lipo -info "${PREFIX}/lib/libcurl-imp-tvos.a"
