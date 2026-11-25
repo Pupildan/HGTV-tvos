@@ -14,6 +14,18 @@
 #define CURL_SHIM_H
 #include <curl/curl.h>
 
+/* Swift importer 会把 curl_easy_setopt（varargs）标记为 unavailable——Swift 无法
+ * 调 C varargs 函数。用 C inline 类型安全包装绕开（C 内部调 varargs 合法）。 */
+static inline CURLcode curl_shim_setopt_cstr(CURL *h, CURLoption opt, const char *v) {
+    return curl_easy_setopt(h, opt, v);
+}
+static inline CURLcode curl_shim_setopt_long(CURL *h, CURLoption opt, long v) {
+    return curl_easy_setopt(h, opt, v);
+}
+static inline CURLcode curl_shim_setopt_ptr(CURL *h, CURLoption opt, void *v) {
+    return curl_easy_setopt(h, opt, v);
+}
+
 /* Swift importer 会把 curl_easy_getinfo 的 void* 参数映射成 Any 导致 &status
  * 无法桥接——用 C inline 包装绕开（static inline 在 Swift 可直接调用）。 */
 static inline long curl_shim_get_response_code(CURL *h) {
