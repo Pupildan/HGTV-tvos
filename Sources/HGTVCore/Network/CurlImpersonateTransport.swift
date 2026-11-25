@@ -137,8 +137,9 @@ enum CurlImpersonateTransport {
         code = curl_easy_perform(handle)
         guard code == CURLE_OK else { throw curlError(code, url: url, what: "perform") }
 
-        var status: Int = 0
-        curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status)
+        // 状态码走 curl_shim.h 的 C inline 包装（getinfo 的 void* 在 Swift importer
+        // 里被映射成 Any，&status 无法桥接——绕开）
+        let status = Int(curl_shim_get_response_code(handle))
         return (status: status, data: buffer.data)
     }
 

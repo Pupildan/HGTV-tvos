@@ -13,4 +13,13 @@
 #ifndef CURL_SHIM_H
 #define CURL_SHIM_H
 #include <curl/curl.h>
+
+/* Swift importer 会把 curl_easy_getinfo 的 void* 参数映射成 Any 导致 &status
+ * 无法桥接——用 C inline 包装绕开（static inline 在 Swift 可直接调用）。 */
+static inline long curl_shim_get_response_code(CURL *h) {
+    long code = 0;
+    curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &code);
+    return code;
+}
+
 #endif /* CURL_SHIM_H */
