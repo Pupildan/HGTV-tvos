@@ -7,6 +7,10 @@ import PackageDescription
 let package = Package(
     name: "HGTV",
     platforms: [
+        // macOS 13 声明：impersonate-test 的 swift build 在 macOS runner 上编译
+        // HGTVCore（OSAllocatedUnfairLock=13.0 / data(for:)=12.0 / Logger=11.0），
+        // 无声明时下限 10.13 → 可用性检查全炸（run#5 教训）。tvOS 26 供主构建。
+        .macOS(.v13),
         .tvOS(.v26)
     ],
     products: [
