@@ -38,6 +38,8 @@ echo "==> xcodebuild archive (project HGTV.xcodeproj, ${CONFIG}, tvOS device arm
 rm -rf "${ARCHIVE}"
 # 用真正的 Xcode app 工程（HGTV.xcodeproj）归档，产出规范 tvOS .app。
 # 裸 SwiftPM 可执行包 archive 出来是命令行工具（usr/local/bin），不是 .app。
+# 2>&1 全量落盘（错误诊断关键——tail -60 曾把全部 Swift error 截掉）+ pipefail 保留失败码
+set -o pipefail
 xcodebuild archive \
   -project HGTV.xcodeproj \
   -scheme HGTV \
@@ -48,7 +50,14 @@ xcodebuild archive \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGN_IDENTITY="" \
   SKIP_INSTALL=NO \
-  2>&1 | tail -60
+  2>&1 | tee "$PWD/build_full.log" | tail -60
+BUILD_EXIT=${PIPESTATUS[0]}
+
+if [ "$BUILD_EXIT" -ne 0 ]; then
+  echo "==> ================= 全部编译 error 行（来自 build_full.log）================="
+  grep -E "error:" "$PWD/build_full.log" | grep -viE "warning" | head -60
+  echo "==> ================= error 行结束 ================="
+fi
 
 echo "==> locating archived .app"
 echo "==> archive structure:"

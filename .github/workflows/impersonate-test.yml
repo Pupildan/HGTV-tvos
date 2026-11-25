@@ -52,12 +52,15 @@ jobs:
           CURL_INC="$(brew --prefix)/include"
           echo "curl headers: $CURL_INC/curl/curl.h"
           ls "$CURL_INC/curl/" | head -8 || true
+          set -o pipefail
           xcrun swiftc -typecheck \
             -target arm64-apple-tvos26.0 \
             -sdk "$(xcrun --sdk appletvos --show-sdk-path)" \
             -I "$CURL_INC" \
             -I Vendor/CurlShim \
-            $(find Sources/HGTVCore -name '*.swift' | sort) 2>&1 | head -60
+            $(find Sources/HGTVCore -name '*.swift' | sort) 2>&1 | tee typecheck.log | head -40 || true
+          echo "=== typecheck 全部 error 行 ==="
+          grep -E "error:" typecheck.log | grep -viE "warning" | head -60 || echo "(typecheck 无 error)"
 
       - name: Generate signed landpage request
         run: |
