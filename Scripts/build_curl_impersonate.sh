@@ -45,7 +45,7 @@ echo "IMP_SHA=${IMP_SHA}"
 
 echo "==> cmake configure (tvOS arm64 cross; superbuild pulls BoringSSL+deps+curl)"
 cmake -S . -B build \
-  -DCMAKE_SYSTEM_NAME=iOS \
+  -DCMAKE_SYSTEM_NAME=tvOS \
   -DCMAKE_OSX_SYSROOT="${SDK_PATH}" \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
