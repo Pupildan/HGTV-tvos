@@ -86,9 +86,9 @@ ls "${PREFIX}/lib/"
 # （CurlShim 的 #include <curl/curl.h> 按 curl/ 子目录解析）
 mkdir -p "${PREFIX}/include/curl"
 CURL_INC_DIR=$(find "$WORKDIR/curl-imp/build" -name "curl.h" -not -path "*openssl*" | head -1)
-[ -n "$CURL_INC_DIR" ] && cp "$(dirname "$CURL_INC_DIR")"/curl*.h "${PREFIX}/include/curl/" 2>/dev/null
+[ -n "$CURL_INC_DIR" ] && cp "$(dirname "$CURL_INC_DIR")"/*.h "${PREFIX}/include/curl/" 2>/dev/null
 SRC_CURL_INC=$(find "$WORKDIR/curl-imp" -path "*include/curl/curl.h" -not -path "*/build/*" | head -1)
-[ -n "$SRC_CURL_INC" ] && cp "$(dirname "$SRC_CURL_INC")"/curl*.h "${PREFIX}/include/curl/" 2>/dev/null
+[ -n "$SRC_CURL_INC" ] && cp "$(dirname "$SRC_CURL_INC")"/*.h "${PREFIX}/include/curl/" 2>/dev/null
 echo "--- include/curl 下的 curl 头 ---"
 ls "${PREFIX}/include/curl/" | head -8
 # 头文件：BoringSSL（openssl/*）
