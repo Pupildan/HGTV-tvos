@@ -155,7 +155,7 @@ enum CurlImpersonateTransport {
 
     private static func curlError(_ code: CURLcode, url: String, what: String) -> Error {
         let msg = String(cString: curl_easy_strerror(code))
-        return curlFailure(code.rawValue, detail: "\(what): \(msg)", url: url)
+        return curlFailure(Int32(bitPattern: code.rawValue), detail: "\(what): \(msg)", url: url)
     }
 }
 
