@@ -28,6 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Go (BoringSSL 编译硬依赖)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
       - name: Build tvOS static lib (cross-compile)
         run: |
           chmod +x Scripts/build_curl_impersonate.sh
