@@ -159,16 +159,42 @@ public final class HTTPClient: Sendable {
         Self.logRequest(method: method, url: urlStr, signed: isSigned, headers: headers,
                         bodyLength: signedReq.body?.count)
 
+#if canImport(CurlShim)
+        // —— 传输层路由（第一优先）：字节系域名走 curl-impersonate（chrome131_android
+        //    TLS/H2 指纹）——
+        // 字节 CDN（volc-dcdn）黑名单 Apple 原生 TLS 指纹（landpage 恒 200+0B，五
+        // host × 五身份实测）；NIO 的 BoringSSL ClientHello 特征在 ATV 上实测也未过墙。
+        // 2026-11-24 中国出口归一实验：libcurl-impersonate 同源实现（curl_cffi）
+        // chrome131_android 等 BoringSSL 指纹全部 200+49KB 真数据。本通道用 tvOS
+        // 静态 libcurl-impersonate（CI job build-curl-impersonate 产出 Vendor/curl-imp/），
+        // 失败自动降级 NIO → URLSession 三层兜底。其余域名（自建搜索中转
+        // hongguoduanju.com、镜像 luckysf.net）不在清单，维持 URLSession。
+        if CurlImpersonateTransport.shouldUseCurl(host: target.host) {
+            do {
+                return try await Self.sendViaCurl(url: urlStr, method: method,
+                                                  headers: headers,
+                                                  body: signedReq.body.map { Data($0) })
+            } catch {
+                DiagnosticsLogger.warn("curl-impersonate 通道失败，降级 NIO/URLSession：\(error.localizedDescription)",
+                                       category: "http",
+                                       meta: ["url": urlStr, "channel": "curl-impersonate"])
+            }
+        }
+#endif
+
 #if canImport(AsyncHTTPClient)
-        // —— 传输层路由：字节系域名走 NIO-BoringSSL 通道（v93）——
-        // Apple 原生 TLS 指纹（Network.framework JA3）被字节 CDN 黑名单（landpage 恒
-        // 200+0B，五 host × 五身份实测）；2026-11-24 归一实验实锤任何 BoringSSL/OpenSSL
-        // 指纹可过。landpage/弹幕/播放取流等主链路全部切 NIO；其余域名（自建搜索中转
-        // hongguoduanju.com、镜像 luckysf.net）维持 URLSession。
+        // —— 传输层路由（第二优先）：字节系域名走 NIO-BoringSSL 通道（v93）——
+        // curl-impersonate 通道失败（编译产物缺失/传输错误）时的降级层。
         if NIOHTTPTransport.shouldUseNIO(host: target.host) {
-            return try await Self.sendViaNIO(url: urlStr, method: method,
-                                             headers: headers,
-                                             body: signedReq.body.map { Data($0) })
+            do {
+                return try await Self.sendViaNIO(url: urlStr, method: method,
+                                                 headers: headers,
+                                                 body: signedReq.body.map { Data($0) })
+            } catch {
+                DiagnosticsLogger.warn("NIO-BoringSSL 通道失败，降级 URLSession：\(error.localizedDescription)",
+                                       category: "http",
+                                       meta: ["url": urlStr, "channel": "NIO-BoringSSL"])
+            }
         }
 #endif
 
@@ -198,6 +224,48 @@ public final class HTTPClient: Sendable {
         }
         return data
     }
+
+    // MARK: - curl-impersonate 通道（字节系域名第一优先，chrome131_android TLS/H2 指纹）
+
+#if canImport(CurlShim)
+    /// libcurl-impersonate（curl+BoringSSL，tvOS 静态库）发送签名请求。
+    /// 响应日志带 channel=curl-imp-boringssl，装机后日志服务器可确认通道与指纹状态。
+    private static func sendViaCurl(url: String, method: String,
+                                    headers: [String: String],
+                                    body: Data?) async throws -> Data {
+        do {
+            let result = try await CurlImpersonateTransport.execute(
+                url: url, method: method, headers: headers, body: body)
+            let preview = String(data: result.data.prefix(500), encoding: .utf8)
+                ?? String(decoding: result.data.prefix(500), as: UTF8.self)
+            DiagnosticsLogger.info(
+                "← \(result.status) bytes=\(result.data.count) channel=curl-imp-boringssl \(url)",
+                category: "http",
+                meta: ["status": "\(result.status)",
+                       "bytes": "\(result.data.count)",
+                       "channel": "curl-imp-boringssl",
+                       "body": preview])
+            // 200+0B 是「指纹又被黑」的特征（真数据恒 ~49KB）——不降级（避免三连请求
+            // 浪费），仅打 warn 供装机日志快速定位。
+            if result.data.isEmpty {
+                DiagnosticsLogger.warn(
+                    "HTTP 200 但响应 0B——疑似 TLS 指纹被字节 CDN 黑名单（channel=curl-imp-boringssl）：\(url)",
+                    category: "http", meta: ["status": "\(result.status)", "bytes": "0"])
+            }
+            guard (200..<300).contains(result.status) else {
+                DiagnosticsLogger.warn("HTTP \(result.status)：\(url)（curl-imp-boringssl）", category: "http")
+                throw HTTPError.catalogHTTP(result.status)
+            }
+            return result.data
+        } catch let e as HTTPError {
+            throw e
+        } catch {
+            DiagnosticsLogger.error("curl-impersonate 请求失败：\(error.localizedDescription)", category: "http",
+                                    meta: ["url": url, "channel": "curl-imp-boringssl"])
+            throw HTTPError.network(error)
+        }
+    }
+#endif
 
     // MARK: - NIO-BoringSSL 通道（字节系域名专用，v93）
 
