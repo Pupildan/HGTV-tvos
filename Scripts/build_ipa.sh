@@ -38,8 +38,9 @@ echo "==> xcodebuild archive (project HGTV.xcodeproj, ${CONFIG}, tvOS device arm
 rm -rf "${ARCHIVE}"
 # 用真正的 Xcode app 工程（HGTV.xcodeproj）归档，产出规范 tvOS .app。
 # 裸 SwiftPM 可执行包 archive 出来是命令行工具（usr/local/bin），不是 .app。
-# 2>&1 全量落盘（错误诊断关键——tail -60 曾把全部 Swift error 截掉）+ pipefail 保留失败码
-set -o pipefail
+# Actions 的 run shell 是 bash -e——管道失败（pipefail → 65）会立即退出吞掉诊断段。
+# 显式 set +e 关闭，诊断段用 BUILD_EXIT 手动判定后 exit 1。
+set +e
 rm -rf "$PWD/build.xcresult"
 xcodebuild archive \
   -project HGTV.xcodeproj \
@@ -58,7 +59,6 @@ BUILD_EXIT=${PIPESTATUS[0]}
 if [ "$BUILD_EXIT" -ne 0 ]; then
   echo "==> ================= 全部编译 error 行（来自 build_full.log）================="
   grep -E "error:" "$PWD/build_full.log" | grep -viE "warning" | head -60
-  echo "==> ================= error 行结束 ================="
   echo "==> ================= xcresult 提取（决定性——xcodebuild 管道模式吞明文 error）================="
   if [ -d "$PWD/build.xcresult" ]; then
     xcrun xcresulttool get --legacy --path "$PWD/build.xcresult" --format json > "$PWD/xcresult.json" 2>/dev/null
@@ -74,7 +74,6 @@ for e in errs:
     msg = (e.get('diagnostic', '') or '')[:400]
     print(f'  {fp}:{ln} {msg}')
 if not errs:
-    # 兜底：递归找所有含 error 的诊断文本
     def walk(o, path=''):
         if isinstance(o, dict):
             for k, v in o.items():
@@ -86,6 +85,7 @@ if not errs:
     walk(d)
 PY
   echo "==> ================= xcresult 提取结束 ================="
+  exit "$BUILD_EXIT"   # 失败路径：诊断完直接退出（无 .app 可打包）
 fi
 
 echo "==> locating archived .app"
