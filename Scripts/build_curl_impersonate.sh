@@ -130,7 +130,8 @@ mkdir -p "${PREFIX}/share"
 } > "${PREFIX}/share/BUNDLE_INFO.txt"
 tar czf "$PWD/curl-impersonate-tvos.tar.gz" \
   -C "${PREFIX}" include lib/libcurl-imp-tvos.a share
+# artifact 上传步骤在 workspace 根找文件——拷贝过去
+cp "$PWD/curl-impersonate-tvos.tar.gz" "${GITHUB_WORKSPACE:-.}/curl-impersonate-tvos.tar.gz"
 echo "==> tarball:"
 ls -la "$PWD/curl-impersonate-tvos.tar.gz"
-tar tzf "$PWD/curl-impersonate-tvos.tar.gz" | head -25
 echo "==> done"
