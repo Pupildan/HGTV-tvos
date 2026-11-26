@@ -51,6 +51,9 @@ enum NIOHTTPTransport {
         var config = AsyncHTTPClient.HTTPClient.Configuration()
         config.timeout = .init(connect: .seconds(10), read: .seconds(30))
         config.redirectConfiguration = .follow(max: 5, allowCycles: false)
+        // 强制 HTTP/1.1（2026-11-26 排查：ATV 三层传输全 0B，PC H1.1 组合全通——
+        // 规避 ATV 端 H2 帧指纹嫌疑，与 curl 通道 ③b 对齐）
+        config.httpVersion = .http1Only
         // 响应 gzip/deflate 自动解压（landpage/multi_video_model 响应恒 gzip；
         // 上层解析假设明文，与 URLSession 自动解压行为对齐）
         config.decompression = .enabled(limit: .ratio(50))

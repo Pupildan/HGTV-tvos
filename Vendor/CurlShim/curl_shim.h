@@ -32,6 +32,11 @@ static inline CURLcode curl_shim_set_timeout(CURL *h, long v) {
 static inline CURLcode curl_shim_set_accept_encoding(CURL *h, const char *v) {
     return curl_easy_setopt(h, CURLOPT_ACCEPT_ENCODING, v);
 }
+static inline CURLcode curl_shim_set_http_version_1_1(CURL *h) {
+    /* 强制 HTTP/1.1：ATV 上 H2 帧指纹疑被字节风控，PC 成功案例（urllib）均为
+       HTTP/1.1——impersonate 预设的 ALPN 可能含 h2，此选项让 curl 忽略 h2 协商。 */
+    return curl_easy_setopt(h, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_1_1);
+}
 static inline CURLcode curl_shim_set_httpheader(CURL *h, struct curl_slist *sl) {
     return curl_easy_setopt(h, CURLOPT_HTTPHEADER, sl);
 }

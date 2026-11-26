@@ -100,6 +100,10 @@ enum CurlImpersonateTransport {
         //    （2026-11-26 装机 0B 排查；PC curl_cffi 对照 Accept-Encoding=gzip 成功）
         code = curl_shim_set_accept_encoding(handle, "gzip")
         guard code == CURLE_OK else { throw curlError(code, url: url, what: "setopt encoding") }
+        // ③b 强制 HTTP/1.1（2026-11-26 排查：ATV 三层传输全 200+0B，PC 上 urllib(H1.1)/
+        //     curl.exe/curl_cffi 全通且 ATV 头集/节点/身份/家宽出口均已排除——嫌疑收敛到
+        //     ATV 端 H2 帧指纹，先落 1.1 逃生门，与 PC urllib 成功组合对齐）
+        curl_shim_set_http_version_1_1(handle)
 
         // ④ 字节系签名头（顺序 = SignInterceptor 产出序）
         var slist: UnsafeMutablePointer<curl_slist>? = nil
