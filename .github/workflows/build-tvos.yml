@@ -67,8 +67,8 @@ jobs:
       - name: Verify curl-impersonate bundle
         run: |
           tar xzf Vendor/curl-imp/curl-impersonate-tvos.tar.gz -C Vendor/curl-imp
-          mkdir -p Vendor/CurlShim/curl
-          cp Vendor/curl-imp/include/curl/*.h Vendor/CurlShim/curl/
+          mkdir -p Vendor/CurlShim
+          cp Vendor/curl-imp/include/curl/*.h Vendor/CurlShim/
           echo "=== bundle layout ==="
           find Vendor/curl-imp -maxdepth 2 | head -40
           echo "=== merged archive architectures ==="
