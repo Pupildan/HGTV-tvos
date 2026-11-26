@@ -128,18 +128,16 @@ public final class APIService: Sendable {
         // v91：原生自签版彻底移除桥兜底——自签（突破版参数，commit 3f9d363）失败就抛真实错误，
         // 不再回退任何 PC/NAS 桥路径，让上层看到真实信号。
         let isFirst = offset == 0 && sessionId.isEmpty
-        let payload: [String: Any] = [
-            "filter_ids": "",
-            "req_scene": "default",
-            "offset": offset,
-            "need_selector_panel": isFirst,
-            "limit": 100,
-            "select_items": ["genre": [String](), "sort": ["hot_score"]],
-            "session_id": sessionId,
-            "req_type": isFirst ? "default" : "only_content",
-            "client_req_type": 3,
-        ]
-        let bodyPlain = try JSONSerialization.data(withJSONObject: payload, options: [])
+        // v98：body 固定键序（CanonicalJSON.swift 顶部说明）——键序逐字节对齐
+        // Python test_landpage_v2.py（4/4 实测标准答案），禁用 JSONSerialization。
+        let bodyPlain = Data((
+            "{\"filter_ids\":\"\",\"req_scene\":\"default\",\"offset\":\(offset),"
+            + "\"need_selector_panel\":\(isFirst),\"limit\":100,"
+            + "\"select_items\":{\"genre\":[],\"sort\":[\"hot_score\"]},"
+            + "\"session_id\":\"\(CanonicalJSON.escape(sessionId))\","
+            + "\"req_type\":\"\(isFirst ? "default" : "only_content")\","
+            + "\"client_req_type\":3}"
+        ).utf8)
         // landpage body 必须 gzip：2026-11-24 Nbeedp 实测明文 body 恒 200+0B（五个 host
         // × 三身份全灭），Python test_landpage_v2 gzip body 4/4 全 200——landpage 服务端
         // 只解析 gzip body（与 multi_video_model 恰好相反：那边明文才行）。x-ss-stub 与
@@ -262,26 +260,18 @@ public final class APIService: Sendable {
     /// body（gzip JSON）：{"biz_param":{...},"dr_scene":"player","mixed_video_id_map":{"1004":[vid]}}
     /// 响应：data.<vid>.video_model（内嵌 JSON 字符串）→ video_list[].main_url / encrypt_info.spade_a
     public func fetchPlayback(vid: String) async throws -> PlaybackStream {
-        // 内层 biz_param（s0 方法精确字段）
-        let bizParam: [String: Any] = [
-            "detail_page_version": 0,
-            "device_level": 5,
-            "disable_digg_stat": false,
-            "disable_video_relate_book": false,
-            "need_all_video_definition": true,
-            "need_mp4_align": false,
-            "use_os_player": false,
-            "use_server_dns": true,
-            "use_server_dns_scene": "cold_start_stage",
-            "video_platform": 1024,
-        ]
-        let payload: [String: Any] = [
-            "biz_param": bizParam,
-            "dr_scene": "player",
-            "mixed_video_id_map": ["1004": [vid]],
-        ]
-        let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
-        let gzipped = Gzip.compress(jsonData)
+        // v98：body 固定键序——键序逐字节对齐 Python playback_client.BIZ_PARAM +
+        // play_sign.py（2026-11-24 取流突破实测标准答案），禁用 JSONSerialization。
+        let bodyPlain = Data((
+            "{\"biz_param\":{"
+            + "\"detail_page_version\":0,\"device_level\":5,\"disable_digg_stat\":false,"
+            + "\"disable_video_relate_book\":false,\"need_all_video_definition\":true,"
+            + "\"need_mp4_align\":false,\"use_os_player\":false,\"use_server_dns\":true,"
+            + "\"use_server_dns_scene\":\"cold_start_stage\",\"video_platform\":1024},"
+            + "\"dr_scene\":\"player\","
+            + "\"mixed_video_id_map\":{\"1004\":[\"\(CanonicalJSON.escape(vid))\"]}}"
+        ).utf8)
+        let gzipped = Gzip.compress(bodyPlain)
 
         let target = HTTPTargetImpl(
             host: HGTVConfig.Host.fqnovel,
@@ -517,29 +507,24 @@ public final class APIService: Sendable {
     public func fetchDanmakuWindow(vid: String, bookId: String?,
                                    startOffsetMs: Int, durationMs: Int,
                                    cursor: String) async throws -> DanmakuWindow {
-        var bizParam: [String: Any] = [
-            "start_offset_time": startOffsetMs,
-            // playlet_item_duration 恒 0（抓包实锤，勿传真实时长）
-            "playlet_item_duration": 0,
-            "need_danmaku_guide_type": [1, 3, 4, 2],
-        ]
+        // v98：body 固定键序——键序逐字节对齐 Python test_danmu_v3.py（87 条实测
+        // 标准答案；business_param 内层同序），禁用 JSONSerialization。
+        var bp = "\"playlet_item_duration\":0,"
+            + "\"need_danmaku_guide_type\":[1,3,4,2],"
+            + "\"start_offset_time\":\(startOffsetMs)"
         if let bookId, !bookId.isEmpty {
-            bizParam["book_id"] = bookId
+            bp += ",\"book_id\":\"\(CanonicalJSON.escape(bookId))\""
         }
-        let payload: [String: Any] = [
-            "server_channel": 1000,
-            "cursor": cursor,
-            "business_param": bizParam,
-            "group_id": vid,
-            "comment_type": 20,
-            "count": 200,
-            "comment_source": 601,
-            "group_type": 30,
-            "sort": 1,
-            "aid": HGTVConfig.aid,
-            "compliance_status": 0,
-        ]
-        let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let bodyPlain = Data((
+            "{\"server_channel\":1000,"
+            + "\"cursor\":\"\(CanonicalJSON.escape(cursor))\","
+            + "\"business_param\":{\(bp)},"
+            + "\"group_id\":\"\(CanonicalJSON.escape(vid))\","
+            + "\"comment_type\":20,\"count\":200,"
+            + "\"comment_source\":601,\"group_type\":30,\"sort\":1,"
+            + "\"aid\":\(HGTVConfig.aid),\"compliance_status\":0}"
+        ).utf8)
+        let body = bodyPlain
 
         let target = HTTPTargetImpl(
             // 2026-11-24 突破版：弹幕实测成功 host = sinfonlineb（test_danmu_v3.py
