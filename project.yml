@@ -88,4 +88,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.hgtv.star.tvosdp
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: tvOS/Info.plist
-        PRODUCT_NAME: HGTV
+        PRODUCT_NAME: HGTV        # HGTVCore framework 的 swiftmodule 引用了 CurlShim 依赖模块，
+        # app target 编译时必须能解析（否则 "unable to resolve module dependency: CurlShim"）
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Vendor/CurlShim"
