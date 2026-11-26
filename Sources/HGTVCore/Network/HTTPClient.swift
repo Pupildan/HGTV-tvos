@@ -245,12 +245,14 @@ public final class HTTPClient: Sendable {
                        "bytes": "\(result.data.count)",
                        "channel": "curl-imp-boringssl",
                        "body": preview])
-            // 200+0B 是「指纹又被黑」的特征（真数据恒 ~49KB）——不降级（避免三连请求
-            // 浪费），仅打 warn 供装机日志快速定位。
+            // 200+0B 降级：2026-11-26 PC 对照实验实锤本接口不拦指纹（openssl/curl_cffi
+            // chrome131/safari 全 200+49KB），0B 根因在 tvOS 端 curl-imp 实现——0B 必须
+            // 抛错触发 NIO → URLSession 降级，否则三层兜底被锁死在 curl 通道。
             if result.data.isEmpty {
                 DiagnosticsLogger.warn(
-                    "HTTP 200 但响应 0B——疑似 TLS 指纹被字节 CDN 黑名单（channel=curl-imp-boringssl）：\(url)",
+                    "HTTP 200 但响应 0B——curl-imp-boringssl 通道丢弃，降级 NIO/URLSession：\(url)",
                     category: "http", meta: ["status": "\(result.status)", "bytes": "0"])
+                throw HTTPError.invalidResponse
             }
             guard (200..<300).contains(result.status) else {
                 DiagnosticsLogger.warn("HTTP \(result.status)：\(url)（curl-imp-boringssl）", category: "http")
@@ -287,6 +289,13 @@ public final class HTTPClient: Sendable {
                        "bytes": "\(result.data.count)",
                        "channel": "NIO-BoringSSL",
                        "body": preview])
+            // 0B 同样降级 URLSession（2026-11-26 实锤本接口不拦指纹，0B 即通道异常）
+            guard !result.data.isEmpty else {
+                DiagnosticsLogger.warn(
+                    "HTTP 200 但响应 0B——NIO-BoringSSL 通道丢弃，降级 URLSession：\(url)",
+                    category: "http", meta: ["status": "\(result.status)", "bytes": "0"])
+                throw HTTPError.invalidResponse
+            }
             guard (200..<300).contains(result.status) else {
                 DiagnosticsLogger.warn("HTTP \(result.status)：\(url)（NIO-BoringSSL）", category: "http")
                 throw HTTPError.catalogHTTP(result.status)

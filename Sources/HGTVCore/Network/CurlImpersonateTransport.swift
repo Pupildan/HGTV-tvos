@@ -96,9 +96,9 @@ enum CurlImpersonateTransport {
         // CURLOPT_SSL_VERIFYPEER 保持默认 1，不关校验。tvOS 无文件系统 CA bundle，
         // 库已不依赖 CURL_CA_BUNDLE 文件。
 
-        // ③ 响应 gzip/deflate/br/zstd 自动解压（上层拿明文，与 URLSession 行为一致；
-        //    Accept-Encoding 头由 libcurl 按本串原样发出，与 chrome 顺序一致）
-        code = curl_shim_set_accept_encoding(handle, "gzip, deflate, br, zstd")
+        // ③ 响应 gzip 自动解压（上层拿明文）。收窄为 gzip：排除 br/zstd 解压路径嫌疑
+        //    （2026-11-26 装机 0B 排查；PC curl_cffi 对照 Accept-Encoding=gzip 成功）
+        code = curl_shim_set_accept_encoding(handle, "gzip")
         guard code == CURLE_OK else { throw curlError(code, url: url, what: "setopt encoding") }
 
         // ④ 字节系签名头（顺序 = SignInterceptor 产出序）
