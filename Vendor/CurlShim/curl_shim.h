@@ -13,7 +13,7 @@
 //   Xcode（project.yml）HGTVCore 的 SWIFT_INCLUDE_PATHS 指向本目录。
 #ifndef CURL_SHIM_H
 #define CURL_SHIM_H
-#include <curl/curl.h>
+#include "curl.h"   /* same-dir copy pushed by CI; quoted include ignores search paths */
 
 /* —— setopt 系列（每个 option 一个专用函数）—— */
 
